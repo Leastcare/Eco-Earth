@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Caveat, Fraunces, Inter } from "next/font/google";
 import "./globals.css";
+import { EchoEarthProvider } from "@/components/EchoEarthShell";
 
 const fraunces = Fraunces({
   variable: "--font-fraunces",
@@ -36,7 +37,7 @@ export default function RootLayout({
       <body
         className={`${fraunces.variable} ${inter.variable} ${caveat.variable} antialiased`}
       >
-        {children}
+        <EchoEarthProvider>{children}</EchoEarthProvider>
       </body>
     </html>
   );
