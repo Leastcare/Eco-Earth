@@ -1,5 +1,10 @@
+import { Suspense } from "react";
 import NarrationExperience from "@/components/NarrationExperience";
 
 export default function NarrationPage() {
-  return <NarrationExperience />;
+  return (
+    <Suspense>
+      <NarrationExperience />
+    </Suspense>
+  );
 }

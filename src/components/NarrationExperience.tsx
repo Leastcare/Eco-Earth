@@ -1,16 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import {
-  FormEvent,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { AnimatePresence, motion } from "framer-motion";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   BookOpen,
+  BookmarkPlus,
+  Dna,
   Droplets,
+  FlaskConical,
   Info,
   Leaf,
   Mail,
@@ -21,42 +20,63 @@ import {
   Play,
   Send,
   Share2,
-  Sparkles,
   Thermometer,
   Trash2,
+  Volume2,
+  VolumeX,
   Waves,
+  Wind,
   X,
 } from "lucide-react";
 import {
+  LOCATION_READINGS,
   getLocationReading,
   type Era,
   type LocationReading,
+  type Metric,
 } from "@/data/locations";
 import { useEchoEarth } from "@/components/EchoEarthShell";
 
-type Screen = "search" | "data" | "narration" | "time" | "letter";
-
 type AppRoute = "/narration" | "/map" | "/journal" | "/letters" | "/about";
 
-function PaperTexture() {
-  return (
-    <div
-      aria-hidden="true"
-      className="paper-texture pointer-events-none fixed inset-0 z-50"
-    />
-  );
+// ─── helpers ────────────────────────────────────────────────────────────────
+
+function statusDotClass(c: Metric["statusColor"]) {
+  if (c === "moderate") return "dot-moderate";
+  if (c === "high") return "dot-high";
+  return "dot-good";
 }
+
+function statusTextClass(c: Metric["statusColor"]) {
+  if (c === "moderate") return "text-statusModerate";
+  if (c === "high") return "text-statusHigh";
+  return "text-statusGood";
+}
+
+function healthColor(s: LocationReading["healthStatus"]) {
+  if (s === "Critical" || s === "Poor") return "text-statusHigh";
+  if (s === "Moderate") return "text-statusModerate";
+  return "text-statusGood";
+}
+
+function MetricIcon({ label }: { label: string }) {
+  const l = label.toLowerCase();
+  if (l.includes("temperature")) return <Thermometer size={15} strokeWidth={1.4} />;
+  if (l.includes("oxygen"))      return <Droplets    size={15} strokeWidth={1.4} />;
+  if (l.includes("plastic"))     return <Trash2      size={15} strokeWidth={1.4} />;
+  if (l.includes("ph"))          return <FlaskConical size={15} strokeWidth={1.4} />;
+  if (l.includes("flow"))        return <Waves       size={15} strokeWidth={1.4} />;
+  if (l.includes("diversity"))   return <Dna         size={15} strokeWidth={1.4} />;
+  if (l.includes("wind") || l.includes("air")) return <Wind size={15} strokeWidth={1.4} />;
+  return <Droplets size={15} strokeWidth={1.4} />;
+}
+
+// ─── botanical SVG decorations ───────────────────────────────────────────────
 
 function Botanical({ className = "" }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 210 250"
-      aria-hidden="true"
-      className={className}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.3"
-    >
+    <svg viewBox="0 0 210 250" aria-hidden="true" className={className}
+      fill="none" stroke="currentColor" strokeWidth="1.3">
       <path d="M104 243C106 167 105 83 111 4" />
       <path d="M108 178C71 158 42 125 23 82M108 148C145 125 169 91 182 46M106 117C72 101 48 72 39 42M109 91C137 75 153 52 159 28" />
       <path d="M75 157c-27-2-46-16-52-37 24 2 42 14 52 37ZM146 126c27-4 44-20 49-42-25 4-40 18-49 42ZM73 100C48 98 31 84 25 63c22 3 38 14 48 37ZM140 76c21-4 35-16 39-35-20 4-33 14-39 35Z" />
@@ -65,881 +85,1020 @@ function Botanical({ className = "" }: { className?: string }) {
   );
 }
 
-function Landscape() {
+function Landscape({ className = "" }: { className?: string }) {
   return (
-    <svg
-      viewBox="0 0 450 180"
-      aria-hidden="true"
-      className="w-full text-sage/50"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1"
-    >
+    <svg viewBox="0 0 450 180" aria-hidden="true"
+      className={className} fill="none" stroke="currentColor" strokeWidth="1">
       <path d="M0 123 64 68l44 38 52-75 55 69 38-38 38 41 53-75 106 96" />
       <path d="M0 143c58-18 101 18 157 5 55-13 86-7 126 8 57 21 114-6 167-9" />
       <path d="M0 158c54-12 107 4 157-4 66-10 97 25 160 7 59-17 94-5 133 5" />
-      <path d="M282 157c25-11 40-29 56-31 23-3 30 22 47 15 20-9 23-39 65-37" />
     </svg>
   );
 }
 
-function Waveform({ playing }: { playing: boolean }) {
-  const bars = useMemo(
-    () => [
-      12, 18, 10, 24, 40, 66, 33, 20, 52, 85, 45, 21, 35, 72, 26, 16, 42, 57,
-      30, 18, 12, 8,
-    ],
-    [],
-  );
+// ─── waveform ────────────────────────────────────────────────────────────────
 
+function Waveform({ playing, large = false }: { playing: boolean; large?: boolean }) {
+  const bars = [8,14,9,20,34,56,28,16,44,72,38,17,29,61,22,13,36,48,25,15,10,7,12,18,8];
+  const h = large ? 0.55 : 0.28;
+  const w = large ? "w-[3px]" : "w-[2px]";
+  const gap = large ? "gap-[3px]" : "gap-[2px]";
+  const height = large ? "h-10" : "h-5";
   return (
-    <div
-      className="flex h-24 flex-1 items-center gap-1 overflow-hidden"
-      aria-label="Narration waveform"
-    >
-      {bars.map((height, index) => (
-        <span
-          key={index}
-          className={`wave-bar w-1.5 rounded-full bg-waveform/75 ${
-            playing ? "animate-wave" : ""
-          }`}
-          style={{
-            height: `${height}%`,
-            animationDelay: `${index * 55}ms`,
-          }}
+    <div className={`flex ${height} items-center ${gap}`} aria-hidden="true">
+      {bars.map((val, i) => (
+        <span key={i}
+          className={`wave-bar inline-block ${w} rounded-full bg-current ${playing ? "animate-wave" : ""}`}
+          style={{ height: `${Math.max(val * h, large ? 6 : 3)}px`, animationDelay: `${i * 45}ms` }}
         />
       ))}
     </div>
   );
 }
 
-function Sidebar({
-  open,
-  setOpen,
-}: {
-  open: boolean;
-  setOpen: (value: boolean) => void;
-}) {
-  const navItems: {
-    route: AppRoute;
-    label: string;
-    icon: typeof Leaf;
-  }[] = [
-    { route: "/narration", label: "Narration", icon: Leaf },
-    { route: "/map", label: "Map", icon: MapPin },
-    { route: "/journal", label: "Journal", icon: BookOpen },
-    { route: "/letters", label: "Letters", icon: Mail },
-    { route: "/about", label: "About", icon: Info },
+// ─── ElevenLabs audio hook ────────────────────────────────────────────────────
+
+function useElevenLabsAudio(
+  narration: string,
+  locationId: string,
+  playing: boolean,
+  onStop: () => void,
+) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function stopAudio() {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    if (audioRef.current) {
+      audioRef.current.pause();
+      URL.revokeObjectURL(audioRef.current.src);
+      audioRef.current = null;
+    }
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    if (!playing) { stopAudio(); return; }
+    if (!narration.trim()) return;
+
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setLoading(true);
+
+    (async () => {
+      try {
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: narration, locationId }),
+          signal: abort.signal,
+        });
+        if (!res.ok || !res.body || abort.signal.aborted) { setLoading(false); onStop(); return; }
+        const blob = await res.blob();
+        if (abort.signal.aborted) { setLoading(false); return; }
+        const url = URL.createObjectURL(blob);
+        const audio = new Audio(url);
+        audioRef.current = audio;
+        audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; onStop(); };
+        audio.onerror = () => { URL.revokeObjectURL(url); audioRef.current = null; onStop(); };
+        setLoading(false);
+        await audio.play();
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name !== "AbortError") { console.error("[TTS]", err); onStop(); }
+        setLoading(false);
+      }
+    })();
+
+    return () => { abort.abort(); stopAudio(); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [playing, narration, locationId]);
+
+  return { loading };
+}
+
+// ─── Ambient river sound hook ─────────────────────────────────────────────────
+// Plays a subtle river/water ambient loop while on the narration page.
+// Uses a royalty-free rain + river sound from a public CDN.
+
+const AMBIENT_URL = "https://www.soundjay.com/nature/sounds/river-1.mp3";
+// Fallback CDN in case the above is unavailable
+const AMBIENT_FALLBACK = "https://freesound.org/data/previews/531/531947_4921277-lq.mp3";
+
+function useAmbientSound(enabled: boolean) {
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    if (!audioRef.current) {
+      const audio = new Audio(AMBIENT_URL);
+      audio.loop = true;
+      audio.volume = 0.07; // very subtle — barely perceptible
+      audio.preload = "none";
+      // try fallback if primary fails
+      audio.onerror = () => {
+        audio.src = AMBIENT_FALLBACK;
+        audio.load();
+        if (enabled) audio.play().catch(() => {});
+      };
+      audioRef.current = audio;
+    }
+
+    if (enabled) {
+      audioRef.current.play().catch(() => {
+        // Browsers block autoplay — that's fine, user interaction will trigger it
+      });
+    } else {
+      audioRef.current.pause();
+    }
+
+    return () => {};
+  }, [enabled]);
+
+  // Start on first user interaction if not already playing
+  useEffect(() => {
+    if (!enabled) return;
+    const tryPlay = () => {
+      if (audioRef.current && audioRef.current.paused) {
+        audioRef.current.play().catch(() => {});
+      }
+    };
+    document.addEventListener("click", tryPlay, { once: true });
+    document.addEventListener("keydown", tryPlay, { once: true });
+    return () => {
+      document.removeEventListener("click", tryPlay);
+      document.removeEventListener("keydown", tryPlay);
+    };
+  }, [enabled]);
+}
+
+// ─── era toggle ──────────────────────────────────────────────────────────────
+
+function EraToggle({ era, setEra }: { era: Era; setEra: (e: Era) => void }) {
+  const eras: { value: Era; label: string }[] = [
+    { value: "1976", label: "1976" },
+    { value: "Today", label: "Today" },
+    { value: "2050", label: "2050" },
   ];
-
   return (
-    <aside
-      className={`fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-forest/15 bg-sidebar px-8 py-10 transition-transform lg:translate-x-0 ${
-        open ? "translate-x-0 shadow-paper" : "-translate-x-full"
-      }`}
-    >
-      <button
-        onClick={() => setOpen(false)}
-        className="absolute right-5 top-5 text-forest lg:hidden"
-        aria-label="Close menu"
-      >
-        <X size={20} />
-      </button>
-
-      <div className="border-b border-forest/25 pb-9">
-        <div className="font-display text-4xl font-semibold tracking-tight text-forest">
-          EchoEarth
-        </div>
-
-        <p className="mt-3 font-display text-lg leading-6 text-ink/80">
-          Places speak.
-          <br />
-          We listen.
-        </p>
-      </div>
-
-      <nav className="mt-8 space-y-2">
-  {navItems.map(({ route, label, icon: Icon }) => (
-    <Link
-      key={route}
-      href={route}
-      onClick={() => setOpen(false)}
-      className="flex w-full items-center gap-4 rounded-sm px-2 py-3 text-left font-ui text-sm text-ink/75 transition hover:bg-forest/5 hover:text-forest"
-    >
-      <Icon size={19} strokeWidth={1.4} />
-      {label}
-    </Link>
-  ))}
-</nav>
-
-      <div className="relative mt-auto pt-8 text-sage">
-        <Botanical className="absolute -left-12 bottom-16 w-44 rotate-[-8deg] opacity-70" />
-
-        <p className="relative ml-4 font-hand text-2xl leading-7 text-ink/70">
-          The Earth
-          <br />
-          remembers,
-          <br />
-          and now,
-          <br />
-          it speaks.
-        </p>
-      </div>
-    </aside>
-  );
-}
-
-function SearchBar({
-  location,
-  onChange,
-  onSubmit,
-}: {
-  location: string;
-  onChange: (value: string) => void;
-  onSubmit: (event: FormEvent) => void;
-}) {
-  return (
-    <form
-      onSubmit={onSubmit}
-      className="mx-auto flex w-full max-w-xl items-center rounded-lg border border-forest/15 bg-card px-4 py-1.5 shadow-[0_3px_9px_rgba(60,48,28,.06)]"
-    >
-      <MapPin className="mr-3 text-forest" size={20} strokeWidth={1.4} />
-
-      <input
-        value={location}
-        onChange={(event) => onChange(event.target.value)}
-        className="min-w-0 flex-1 bg-transparent py-2 font-ui text-sm text-ink outline-none placeholder:text-ink/45"
-        placeholder="Search a river, forest, lake, or city"
-      />
-
-      <button
-        type="button"
-        onClick={() => onChange("")}
-        className="p-1 text-ink/60 hover:text-rust"
-        aria-label="Clear search"
-      >
-        <X size={18} />
-      </button>
-    </form>
-  );
-}
-
-function Hero({ location }: { location: LocationReading }) {
-  return (
-    <section>
-      <div className="relative inline-block">
-        <span className="absolute -left-10 -top-7 font-hand text-xl text-rust">
-          You are listening
-        </span>
-
-        <svg
-          className="absolute -left-5 -top-1 h-10 w-11 text-ink/70"
-          viewBox="0 0 50 50"
-          fill="none"
-          stroke="currentColor"
-        >
-          <path d="M4 3c-2 23 8 33 29 35" />
-          <path d="m28 31 6 8-9 3" />
-        </svg>
-
-        <h1 className="font-display text-5xl font-medium leading-none tracking-tight text-forest sm:text-7xl">
-          {location.name}
-        </h1>
-      </div>
-
-      <p className="mt-4 font-ui text-xs font-medium uppercase tracking-[.18em] text-ink/80">
-        {location.subtitle}
-      </p>
-
-      <div className="mt-7 flex flex-wrap gap-x-5 gap-y-3 font-ui text-xs text-ink/75">
-        <span className="flex items-center gap-2">
-          <Droplets size={15} />
-          {location.type}
-        </span>
-
-        <span className="flex items-center gap-2">
-          <Waves size={15} />
-          {location.origin}
-        </span>
-
-        <span className="flex items-center gap-2">
-          <MapPin size={15} />
-          {location.coordinates}
-        </span>
-      </div>
-    </section>
-  );
-}
-
-function statusDot(statusColor: "good" | "moderate" | "high") {
-  if (statusColor === "moderate") return "bg-statusModerate";
-  if (statusColor === "high") return "bg-statusHigh";
-  return "bg-statusGood";
-}
-
-function MetricIcon({ label }: { label: string }) {
-  const normalized = label.toLowerCase();
-
-  if (normalized.includes("temperature")) {
-    return <Thermometer size={19} />;
-  }
-
-  if (normalized.includes("oxygen")) {
-    return <Sparkles size={19} />;
-  }
-
-  if (normalized.includes("plastic")) {
-    return <Trash2 size={19} />;
-  }
-
-  if (normalized.includes("ph")) {
-    return <Waves size={19} />;
-  }
-
-  return <Droplets size={19} />;
-}
-
-function Snapshot({ location }: { location: LocationReading }) {
-  const isProjection = location.updatedAt.toLowerCase().includes("projected");
-
-  return (
-    <aside className="rounded-sm border-y border-forest/15 py-4">
-      <h2 className="font-display text-xl text-forest">Current condition</h2>
-
-      <p className="mt-1 font-ui text-xs text-ink/65">
-        {isProjection ? "Projected scenario snapshot" : "Live data snapshot"}
-      </p>
-
-      <div className="mt-5">
-        {location.metrics.map((metric) => (
-          <div
-            className="grid grid-cols-[26px_1fr_auto] gap-2 border-t border-forest/15 py-3"
-            key={metric.label}
-          >
-            <span className="mt-1 text-sage">
-              <MetricIcon label={metric.label} />
-            </span>
-
-            <div>
-              <p className="font-display text-sm text-ink">{metric.label}</p>
-              <p className="font-ui text-xs text-ink/72">{metric.value}</p>
-            </div>
-
-            <span className="mt-4 flex items-center gap-1.5 font-ui text-[10px] text-ink/65">
-              <i
-                className={`h-2 w-2 rounded-full ${statusDot(metric.statusColor)}`}
-              />
-              {metric.status}
-            </span>
-          </div>
-        ))}
-      </div>
-
-      <p className="mt-3 font-ui text-[10px] leading-5 text-ink/65">
-        Source: {location.source}
-        <br />
-        Updated: {location.updatedAt}
-      </p>
-    </aside>
-  );
-}
-
-function MiniChart({ location }: { location: LocationReading }) {
-  const values = location.trend;
-
-  const points = values
-    .map((value, index) => {
-      const x = 15 + (index * 260) / Math.max(values.length - 1, 1);
-      const y = 132 - ((value - 0.5) / 10) * 100;
-      return `${x},${y}`;
-    })
-    .join(" ");
-
-  const annotation =
-    location.name === "Yamuna River"
-      ? "Needs care"
-      : location.name === "Dal Lake"
-        ? "Restoring slowly"
-        : "Improving, slowly";
-
-  return (
-    <div className="paper-card relative rotate-[1deg] p-6 sm:p-8">
-      <span className="washi-tape" />
-
-      <div className="flex items-start justify-between">
-        <div>
-          <h3 className="font-display text-lg text-ink">Water quality (BOD)</h3>
-
-          <p className="font-hand text-xl text-ink/80">
-            {location.updatedAt.toLowerCase().includes("projected")
-              ? "Projected trend"
-              : "Last 12 months"}
-          </p>
-        </div>
-
-        <span className="font-ui text-[10px] uppercase tracking-[.16em] text-sage">
-          mg/L
-        </span>
-      </div>
-
-      <svg
-        className="mt-5 h-40 w-full overflow-visible"
-        viewBox="0 0 300 150"
-        role="img"
-        aria-label="Biochemical oxygen demand trend chart"
-      >
-        <path d="M15 15V135H285" fill="none" stroke="rgba(44,42,36,.25)" />
-
-        <path
-          d="M15 55H285M15 95H285"
-          fill="none"
-          stroke="rgba(44,42,36,.12)"
-          strokeDasharray="3 5"
-        />
-
-        <polyline
-          points={points}
-          fill="none"
-          stroke="#43533A"
-          strokeWidth="2"
-        />
-
-        {points.split(" ").map((point, index) => {
-          const [cx, cy] = point.split(",");
-
-          return <circle key={index} cx={cx} cy={cy} r="3.2" fill="#43533A" />;
-        })}
-
-        <text x="20" y="148" className="fill-ink/60 text-[9px]">
-          Start
-        </text>
-
-        <text x="250" y="148" className="fill-ink/60 text-[9px]">
-          Now
-        </text>
-      </svg>
-
-      <div className="absolute right-5 top-1/2 rotate-[-4deg] font-hand text-xl text-ink/80">
-        {annotation} <span className="ml-2 text-rust">↘</span>
-      </div>
-
-      <p className="mt-3 text-center font-hand text-xl text-ink/75">
-        Lower is better
-      </p>
+    <div className="inline-flex items-center rounded-full border border-forest/20 bg-paper p-0.5">
+      {eras.map(({ value, label }) => (
+        <button key={value} onClick={() => setEra(value)}
+          className={`rounded-full px-3.5 py-1 font-ui text-[11px] font-medium transition ${
+            era === value ? "bg-forest text-card shadow-sm" : "text-ink/50 hover:text-forest"
+          }`}>
+          {label}
+        </button>
+      ))}
     </div>
   );
 }
 
-function AudioNarration({
-  location,
-  playing,
-  onToggle,
-}: {
-  location: LocationReading;
-  playing: boolean;
-  onToggle: () => void;
+// ─── search overlay ───────────────────────────────────────────────────────────
+
+function SearchOverlay({ open, onClose, onSelect }: {
+  open: boolean; onClose: () => void; onSelect: (q: string) => void;
 }) {
-  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+  const [query, setQuery] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
-      return;
-    }
+    if (open) { setQuery(""); setTimeout(() => inputRef.current?.focus(), 50); }
+  }, [open]);
 
-    if (!("speechSynthesis" in window)) {
-      return;
-    }
+  function handleSubmit(e: FormEvent) {
+    e.preventDefault();
+    if (!query.trim()) return;
+    onSelect(query); onClose();
+  }
 
-    window.speechSynthesis.cancel();
+  if (!open) return null;
 
-    if (!playing) {
-      utteranceRef.current = null;
-      return;
-    }
-
-    const utterance = new SpeechSynthesisUtterance(location.narration);
-
-    utterance.rate = 0.88;
-    utterance.pitch = 0.92;
-    utterance.volume = 1;
-
-    utterance.onend = () => {
-      utteranceRef.current = null;
-      onToggle();
-    };
-
-    utterance.onerror = () => {
-      utteranceRef.current = null;
-      onToggle();
-    };
-
-    utteranceRef.current = utterance;
-    window.speechSynthesis.speak(utterance);
-
-    return () => {
-      window.speechSynthesis.cancel();
-      utteranceRef.current = null;
-    };
-  }, [location.narration, onToggle, playing]);
+  const allLocations = Object.values(LOCATION_READINGS).map((eras) => eras["Today"]);
+  const filtered = query.trim()
+    ? allLocations.filter((r) =>
+        r.name.toLowerCase().includes(query.toLowerCase()) ||
+        r.subtitle.toLowerCase().includes(query.toLowerCase()))
+    : allLocations;
 
   return (
-    <section className="mt-10">
-      <div className="flex items-center gap-5">
-        <button
-          onClick={onToggle}
-          className="grid h-16 w-16 shrink-0 place-items-center rounded-full border-[8px] border-forest/10 bg-sage text-card shadow-[0_0_0_1px_rgba(67,83,58,.25)] transition hover:scale-105"
-          aria-label={playing ? "Pause narration" : "Play narration"}
-        >
-          {playing ? (
-            <Pause fill="currentColor" size={22} />
-          ) : (
-            <Play fill="currentColor" className="ml-1" size={22} />
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-ink/40 pt-20 backdrop-blur-sm"
+      onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="w-full max-w-lg overflow-hidden rounded-2xl border border-forest/15 bg-card shadow-paper">
+        <form onSubmit={handleSubmit} className="flex items-center gap-3 border-b border-forest/10 px-4 py-3">
+          <MapPin size={16} className="shrink-0 text-forest" />
+          <input ref={inputRef} value={query} onChange={(e) => setQuery(e.target.value)}
+            className="min-w-0 flex-1 bg-transparent font-ui text-sm text-ink outline-none placeholder:text-ink/40"
+            placeholder="Search a river, lake, forest, or city…" />
+          <button type="button" onClick={onClose} className="text-ink/35 hover:text-rust" aria-label="Close">
+            <X size={16} />
+          </button>
+        </form>
+        <div className="max-h-64 overflow-y-auto">
+          <p className="px-4 pb-1 pt-3 font-ui text-[10px] uppercase tracking-[.15em] text-ink/35">
+            {query.trim() ? `${filtered.length} result${filtered.length !== 1 ? "s" : ""}` : "All locations"}
+          </p>
+          {filtered.map((r) => (
+            <button key={r.id} type="button"
+              onClick={() => { onSelect(r.name); onClose(); }}
+              className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition hover:bg-forest/5">
+              <MapPin size={12} className="shrink-0 text-sage" />
+              <div className="min-w-0 flex-1">
+                <p className="font-ui text-sm font-medium text-ink">{r.name}</p>
+                <p className="font-ui text-[11px] text-ink/45">{r.subtitle}</p>
+              </div>
+              <span className={`font-ui text-[11px] font-semibold ${
+                r.healthStatus === "Good" ? "text-statusGood" :
+                r.healthStatus === "Moderate" ? "text-statusModerate" : "text-statusHigh"
+              }`}>{r.healthIndex}/100</span>
+            </button>
+          ))}
+          {filtered.length === 0 && (
+            <p className="px-4 py-4 font-ui text-sm text-ink/40">No locations found.</p>
           )}
-        </button>
-
-        <Waveform playing={playing} />
+        </div>
       </div>
-
-      <div className="relative mt-8 max-w-2xl px-8">
-        <span className="absolute left-0 -top-2 font-display text-5xl leading-none text-rust">
-          “
-        </span>
-
-        <p className="font-display text-xl leading-8 text-ink sm:text-2xl sm:leading-9">
-          {location.narration}
-        </p>
-
-        <span className="absolute -bottom-8 right-0 font-display text-5xl leading-none text-rust">
-          ”
-        </span>
-      </div>
-
-      <p className="mt-12 flex items-center gap-1.5 font-ui text-[11px] text-ink/65">
-        Browser voice preview · replace with TTS audio in production
-        <Info size={13} />
-      </p>
-    </section>
+    </div>
   );
 }
 
-function TimeControl({
-  era,
-  setEra,
-}: {
-  era: Era;
-  setEra: (era: Era) => void;
-}) {
-  const labels: Era[] = ["1976", "Today", "2050"];
+// ─── nav sidebar ─────────────────────────────────────────────────────────────
+
+function NavSidebar({ open, setOpen }: { open: boolean; setOpen: (v: boolean) => void }) {
+  const items: { route: AppRoute; label: string; Icon: typeof Leaf }[] = [
+    { route: "/narration", label: "Narration",  Icon: Leaf     },
+    { route: "/map",       label: "Map",        Icon: MapPin   },
+    { route: "/journal",   label: "Journal",    Icon: BookOpen },
+    { route: "/letters",   label: "Letters",    Icon: Mail     },
+    { route: "/about",     label: "About",      Icon: Info     },
+  ];
+
+  const NavContent = () => (
+    <>
+      {/* Logo */}
+      <div className="mb-2 border-b border-forest/15 pb-6">
+        <div className="font-display text-3xl font-semibold tracking-tight text-forest">EchoEarth</div>
+        <p className="mt-2 font-display text-sm leading-5 text-ink/60">
+          Places speak.<br />We listen.
+        </p>
+      </div>
+
+      {/* Nav */}
+      <nav className="mt-5 space-y-0.5">
+        {items.map(({ route, label, Icon }) => (
+          <Link key={route} href={route}
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-3 rounded-md px-2 py-2.5 font-ui text-sm text-ink/65 transition hover:bg-forest/6 hover:text-forest">
+            <Icon size={16} strokeWidth={1.4} />
+            {label}
+          </Link>
+        ))}
+      </nav>
+
+      {/* Botanical + tagline at bottom */}
+      <div className="relative mt-auto pt-8 text-sage">
+        <Botanical className="absolute -left-8 bottom-14 w-36 rotate-[-6deg] opacity-60" />
+        <p className="relative ml-2 font-hand text-xl leading-6 text-ink/55">
+          The Earth<br />remembers,<br />and now,<br />it speaks.
+        </p>
+      </div>
+    </>
+  );
 
   return (
-    <section className="mt-8 rounded-sm border border-forest/15 bg-card p-5 shadow-[0_5px_18px_rgba(60,48,28,.06)]">
-      <p className="font-hand text-2xl text-rust">Move through the current</p>
+    <>
+      {/* Desktop in-flow */}
+      <nav className="hidden w-44 shrink-0 flex-col border-r border-forest/12 bg-sidebar px-6 py-8 lg:flex">
+        <NavContent />
+      </nav>
 
-      <div className="relative mt-6 grid grid-cols-3">
-        <div className="absolute left-[16.5%] right-[16.5%] top-4 h-px bg-forest/30" />
+      {/* Mobile drawer */}
+      <aside className={`fixed inset-y-0 left-0 z-50 flex w-52 flex-col border-r border-forest/12 bg-sidebar px-6 py-8 transition-transform lg:hidden ${
+        open ? "translate-x-0 shadow-paper" : "-translate-x-full"
+      }`}>
+        <button onClick={() => setOpen(false)} className="absolute right-4 top-4 text-forest" aria-label="Close">
+          <X size={18} />
+        </button>
+        <NavContent />
+      </aside>
+    </>
+  );
+}
 
-        {labels.map((label) => (
-          <button
-            key={label}
-            onClick={() => setEra(label)}
-            className="relative z-10 flex flex-col items-center gap-2"
-          >
-            <i
-              className={`h-8 w-8 rounded-full border-4 border-card ${
-                era === label
-                  ? "bg-rust shadow-[0_0_0_1px_#C15A2E]"
-                  : "bg-sidebar shadow-[0_0_0_1px_rgba(67,83,58,.25)]"
-              }`}
-            />
+// ─── top bar ─────────────────────────────────────────────────────────────────
 
-            <span
-              className={`font-ui text-xs ${
-                era === label ? "font-semibold text-forest" : "text-ink/60"
-              }`}
-            >
-              {label === "1976"
-                ? "50 years ago"
-                : label === "2050"
-                  ? "2050 projected"
-                  : "Today"}
-            </span>
-          </button>
+function TopBar({ location, onMenuOpen, onSearch, onSave, onShare, ambientOn, onAmbientToggle }: {
+  location: LocationReading; onMenuOpen: () => void; onSearch: () => void;
+  onSave: () => void; onShare: () => void;
+  ambientOn: boolean; onAmbientToggle: () => void;
+}) {
+  const [saved, setSaved] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  return (
+    <header className="flex shrink-0 items-center justify-between border-b border-forest/10 bg-paper/90 px-5 py-3 backdrop-blur-sm">
+      <div className="flex items-center gap-3">
+        <button onClick={onMenuOpen} className="text-forest lg:hidden" aria-label="Open menu">
+          <Menu size={20} />
+        </button>
+        <button onClick={onSearch}
+          className="flex max-w-[180px] items-center gap-2 truncate rounded-full border border-forest/15 bg-card px-3 py-1.5 font-ui text-xs text-ink/60 shadow-sm transition hover:border-forest/30 hover:text-forest sm:max-w-none sm:px-3.5">
+          <MapPin size={12} className="shrink-0" />
+          <span className="truncate">{location.subtitle}</span>
+          <span className="shrink-0 text-ink/30">↓</span>
+        </button>
+      </div>
+      <div className="flex items-center gap-3 font-ui text-xs">
+        <button onClick={onAmbientToggle}
+          title={ambientOn ? "Mute river sounds" : "Play river sounds"}
+          className={`hidden items-center gap-1.5 transition sm:flex ${ambientOn ? "text-forest" : "text-ink/40 hover:text-forest"}`}>
+          {ambientOn ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          <span className="hidden sm:inline">{ambientOn ? "Ambient on" : "Ambient"}</span>
+        </button>
+        <button onClick={() => { onSave(); setSaved(true); setTimeout(() => setSaved(false), 2000); }}
+          className={`hidden items-center gap-1.5 transition sm:flex ${saved ? "text-forest" : "text-ink/45 hover:text-forest"}`}>
+          <BookmarkPlus size={14} />
+          {saved ? "Saved!" : "Save"}
+        </button>
+        <button onClick={() => { onShare(); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+          className={`flex items-center gap-1.5 transition ${copied ? "text-forest" : "text-ink/45 hover:text-forest"}`}>
+          <Share2 size={13} />
+          {copied ? "Copied!" : "Share"}
+        </button>
+      </div>
+    </header>
+  );
+}
+
+// ─── mini trend chart ─────────────────────────────────────────────────────────
+
+function TrendChart({ location }: { location: LocationReading }) {
+  const values = location.trend;
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const range = max - min || 1;
+  const W = 280, H = 80, pad = 8;
+
+  const points = values.map((v, i) => {
+    const x = pad + (i / (values.length - 1)) * (W - pad * 2);
+    const y = H - pad - ((v - min) / range) * (H - pad * 2);
+    return [x, y] as [number, number];
+  });
+
+  const pathD = points.map(([x, y], i) => `${i === 0 ? "M" : "L"} ${x} ${y}`).join(" ");
+
+  const isProjection = location.updatedAt.toLowerCase().includes("projected");
+
+  return (
+    <div className="paper-card relative mt-4 rotate-[0.5deg] p-4">
+      <span className="washi-tape" />
+      <div className="flex items-start justify-between">
+        <div>
+          <p className="font-display text-sm font-semibold text-ink">Water Quality (BOD)</p>
+          <p className="font-hand text-base text-ink/60">
+            {isProjection ? "Projected trend" : "Last 12 months"}
+          </p>
+        </div>
+        <span className="font-ui text-[9px] uppercase tracking-[.15em] text-sage">mg/L</span>
+      </div>
+
+      <svg className="mt-3 w-full overflow-visible" viewBox={`0 0 ${W} ${H}`}
+        role="img" aria-label="Water quality trend">
+        {/* grid */}
+        <path d={`M${pad} ${pad} V${H - pad} H${W - pad}`} fill="none" stroke="rgba(44,42,36,.15)" strokeWidth="1" />
+        <line x1={pad} y1={H/2} x2={W - pad} y2={H/2} stroke="rgba(44,42,36,.08)" strokeDasharray="3 4" />
+        {/* line */}
+        <path d={pathD} fill="none" stroke="#43533a" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        {/* dots */}
+        {points.map(([x, y], i) => <circle key={i} cx={x} cy={y} r="2.5" fill="#43533a" />)}
+        {/* labels */}
+        <text x={pad} y={H + 2} fontSize="9" fill="rgba(44,42,36,.45)" fontFamily="var(--font-inter)">Start</text>
+        <text x={W - pad - 16} y={H + 2} fontSize="9" fill="rgba(44,42,36,.45)" fontFamily="var(--font-inter)">Now</text>
+      </svg>
+
+      <p className="mt-2 text-center font-hand text-sm text-ink/50">Lower is better</p>
+
+      {/* annotation */}
+      <div className="absolute right-4 top-1/2 -translate-y-1/2 rotate-[-3deg]">
+        <p className="font-hand text-sm text-ink/55">
+          {location.healthStatus === "Good" ? "Improving ↗" :
+           location.healthStatus === "Moderate" ? "Holding steady →" : "Needs care ↘"}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── right panel: metrics + chart ────────────────────────────────────────────
+
+function ConditionPanel({ location }: { location: LocationReading }) {
+  const isProjection = location.updatedAt.toLowerCase().includes("projected");
+
+  // SVG health ring
+  const r = 28, circ = 2 * Math.PI * r;
+  const fill = (location.healthIndex / 100) * circ;
+  const ringColor =
+    location.healthStatus === "Good" ? "#4c7a3d" :
+    location.healthStatus === "Moderate" ? "#c4872e" : "#b23b2e";
+
+  return (
+    <div className="flex h-full flex-col overflow-y-auto px-5 py-6">
+      {/* Health score ring */}
+      <div className="mb-5 flex items-center gap-4 rounded-lg border border-forest/10 bg-card/60 p-4">
+        <svg width="68" height="68" className="-rotate-90 shrink-0">
+          <circle cx="34" cy="34" r={r} fill="none" stroke="rgba(44,42,36,.08)" strokeWidth="5" />
+          <circle cx="34" cy="34" r={r} fill="none" stroke={ringColor} strokeWidth="5"
+            strokeDasharray={`${fill} ${circ}`} strokeLinecap="round" />
+        </svg>
+        <div>
+          <p className="font-ui text-[9px] font-semibold uppercase tracking-[.18em] text-ink/40">Health Index</p>
+          <p className={`font-display text-3xl font-bold leading-none ${healthColor(location.healthStatus)}`}>
+            {location.healthIndex}<span className="font-display text-base text-ink/25">/100</span>
+          </p>
+          <p className={`mt-1 font-ui text-[11px] font-bold uppercase tracking-[.1em] ${healthColor(location.healthStatus)}`}>
+            {location.healthStatus}
+          </p>
+        </div>
+      </div>
+
+      {/* header */}
+      <div className="mb-3">
+        <h2 className="font-display text-base font-semibold text-ink">My Current Condition</h2>
+        <p className="font-ui text-[10px] italic text-ink/40">
+          {isProjection ? "Projected scenario" : "Live data snapshot"}
+        </p>
+      </div>
+
+      {/* metrics */}
+      <div>
+        {location.metrics.map((m) => (
+          <div key={m.label} className="flex items-center gap-2.5 border-b border-forest/8 py-2.5 last:border-b-0">
+            <span className="shrink-0 text-ink/35"><MetricIcon label={m.label} /></span>
+            <div className="min-w-0 flex-1">
+              <p className="font-ui text-[10px] font-semibold uppercase tracking-[.08em] text-ink/45">{m.label}</p>
+              <p className="font-display text-sm font-semibold text-ink">{m.value}</p>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              <span className={`h-2 w-2 rounded-full ${statusDotClass(m.statusColor)}`} />
+              <span className={`font-ui text-[10px] font-semibold ${statusTextClass(m.statusColor)}`}>{m.status}</span>
+            </div>
+          </div>
         ))}
       </div>
-    </section>
-  );
-}
 
-function LetterComposer({ location }: { location: LocationReading }) {
-  const [letter, setLetter] = useState(`Dear ${location.name},\n\n`);
-  const [response, setResponse] = useState("");
+      {/* source */}
+      <p className="mt-3 font-ui text-[10px] leading-5 text-ink/35">
+        Source: {location.source}<br />
+        Updated: {isProjection ? "Projected scenario" : location.updatedAt}
+      </p>
 
-  function handleSend(event: FormEvent) {
-    event.preventDefault();
+      {/* trend chart */}
+      <TrendChart location={location} />
 
-    // TODO: POST the letter and current structured environmental data
-    // to the FastAPI/Express backend, then request a grounded Claude reply.
-    setResponse(
-      "I hear your promise in the small things: a refill bottle carried, a drain kept clear, a question asked at a public meeting. Care becomes a current when it is shared. Keep it moving.",
-    );
-  }
-
-  return (
-    <section className="relative mt-12 overflow-hidden rounded-sm border border-forest/15 bg-card p-6 shadow-paper sm:p-8">
-      <div className="absolute inset-x-0 top-20 h-px bg-forest/10" />
-
-      <div className="relative flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="flex items-center gap-2 font-display text-2xl text-rust">
-            <PencilLine size={23} />
-            Write a letter back
-          </h2>
-
-          <p className="mt-1 font-ui text-xs text-ink/70">
-            Your words matter. The places you love are listening.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          className="font-ui text-xs text-ink/75 hover:text-rust"
-        >
-          Guidelines for a meaningful letter ↓
-        </button>
+      {/* "what this means" sticky note */}
+      <div className="sticky-note relative mt-5 overflow-hidden rounded-sm p-4">
+        <h3 className="font-display text-sm font-semibold text-ink">What this means</h3>
+        <p className="mt-1.5 font-hand text-base leading-6 text-ink/80">
+          BOD indicates organic pollution. Lower levels mean cleaner water with more oxygen for aquatic life.
+        </p>
+        <Botanical className="absolute -bottom-5 right-0 w-14 text-sage/40" />
       </div>
 
-      <form
-        onSubmit={handleSend}
-        className="relative mt-7 grid gap-5 md:grid-cols-[1fr_auto]"
-      >
-        <textarea
-          value={letter}
-          onChange={(event) => setLetter(event.target.value)}
-          className="min-h-40 w-full resize-y rounded-sm border border-forest/15 bg-transparent px-5 py-4 font-hand text-2xl leading-[2.05rem] text-ink outline-none [background-image:linear-gradient(transparent_32px,rgba(67,83,58,.12)_33px)] [background-size:100%_33px]"
-          aria-label="Letter to the location"
-        />
-
-        <div className="flex flex-row items-end gap-4 md:flex-col">
-          <div className="stamp hidden text-sage md:grid">
-            <Leaf size={34} strokeWidth={1.1} />
-          </div>
-
-          <button
-            type="submit"
-            className="inline-flex items-center gap-2 rounded-lg bg-forest px-5 py-3 font-ui text-sm text-card transition hover:bg-sage"
-          >
-            Send letter
-            <Send size={16} />
-          </button>
-        </div>
-      </form>
-
-      {response && (
-        <div className="relative mt-7 rotate-[-0.7deg] border border-rust/20 bg-[#f6e7c5] p-5 shadow-[0_6px_14px_rgba(60,48,28,.1)]">
-          <span className="font-hand text-xl text-rust">
-            A reply from {location.name}
-          </span>
-
-          <p className="mt-2 font-display text-lg leading-7 text-ink">
-            {response}
-          </p>
-
-          <p className="mt-3 font-ui text-[10px] uppercase tracking-[.13em] text-ink/55">
-            Grounded in this location’s displayed data
-          </p>
-        </div>
-      )}
-    </section>
+      {/* landscape */}
+      <div className="mt-6 text-sage/35">
+        <Landscape className="w-full" />
+      </div>
+    </div>
   );
 }
 
-function StageHeader({ screen }: { screen: Screen }) {
-  const content: Record<
-    Screen,
-    { eyebrow: string; title: string; description: string }
-  > = {
-    search: {
-      eyebrow: "Screen 1 · begin with a place",
-      title: "Which place would you like to hear?",
-      description:
-        "Search for a river, forest, lake, park, or the place you call home.",
-    },
-    data: {
-      eyebrow: "Screen 2 · evidence first",
-      title: "Before the voice, the record.",
-      description:
-        "EchoEarth makes its sources visible before it turns environmental data into a narrative.",
-    },
-    narration: {
-      eyebrow: "Screen 3 · listen closely",
-      title: "A place speaks in signals.",
-      description:
-        "Play the narration while keeping the underlying numbers in view.",
-    },
-    time: {
-      eyebrow: "Screen 4 · shift the current",
-      title: "The same place, across time.",
-      description:
-        "Move between a remembered past, the present record, and a data-grounded projection.",
-    },
-    letter: {
-      eyebrow: "Screen 5 · write back",
-      title: "A letter, not a chat.",
-      description:
-        "Respond to the place in your own words. Its reply remains tied to the same environmental record.",
-    },
-  };
+// ─── health badge ─────────────────────────────────────────────────────────────
 
-  const current = content[screen];
+function HealthBadge({ location }: { location: LocationReading }) {
+  const dotColor =
+    location.healthStatus === "Good" ? "dot-good" :
+    location.healthStatus === "Moderate" ? "dot-moderate" : "dot-high";
+  const textColor = healthColor(location.healthStatus);
+  const borderBg =
+    location.healthStatus === "Good"
+      ? "border-statusGood/25 bg-statusGood/8"
+      : location.healthStatus === "Moderate"
+      ? "border-statusModerate/25 bg-statusModerate/8"
+      : "border-statusHigh/25 bg-statusHigh/8";
 
   return (
-    <section className="mb-10 border-b border-forest/15 pb-7">
-      <p className="font-hand text-2xl text-rust">{current.eyebrow}</p>
-
-      <h2 className="mt-2 font-display text-4xl text-forest">
-        {current.title}
-      </h2>
-
-      <p className="mt-2 max-w-2xl font-ui text-sm leading-6 text-ink/72">
-        {current.description}
-      </p>
-    </section>
+    <div className={`flex items-center gap-2 rounded-full border px-3 py-1 font-ui text-xs font-semibold ${borderBg} ${textColor}`}>
+      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+      Health: {location.healthIndex}/100 · {location.healthStatus}
+    </div>
   );
 }
+
+// ─── center: hero + narration ─────────────────────────────────────────────────
+
+function NarrationHero({ location, era, setEra, playing, ttsLoading, onTogglePlay, liveNarration, narrationLoading }: {
+  location: LocationReading; era: Era; setEra: (e: Era) => void;
+  playing: boolean; ttsLoading: boolean; onTogglePlay: () => void;
+  liveNarration: string; narrationLoading: boolean;
+}) {
+  const text = liveNarration || location.narration;
+  const paragraphs = text.split("\n\n").map((p) => p.replace(/\n/g, " ").trim()).filter(Boolean);
+  const headlineLines = location.headline.split("\n");
+
+  return (
+    <div>
+      <div className="px-5 py-6 sm:px-8 sm:py-8 lg:px-12">
+        {/* "You are listening" handwritten label */}
+        <div className="relative mb-4">
+          <span className="font-hand text-lg text-rust">You are listening</span>
+          <svg className="absolute left-28 -top-1 h-8 w-9 text-ink/50" viewBox="0 0 50 40"
+            fill="none" stroke="currentColor">
+            <path d="M4 3c-2 18 8 27 24 28" />
+            <path d="m24 25 5 6-7 2" />
+          </svg>
+        </div>
+
+        {/* River name */}
+        <h1 className="font-display text-4xl font-semibold leading-none tracking-tight text-ink sm:text-5xl lg:text-7xl">
+          {location.name}
+        </h1>
+
+        {/* Subtitle caps */}
+        <p className="mt-3 font-ui text-xs font-semibold uppercase tracking-[.18em] text-ink/60">
+          {location.subtitle.toUpperCase()}
+        </p>
+
+        {/* Meta chips */}
+        <div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 font-ui text-xs text-ink/55">
+          <span className="flex items-center gap-1.5"><Waves size={12} /> {location.type}</span>
+          <span className="flex items-center gap-1.5"><Leaf size={12} /> {location.origin}</span>
+          <span className="flex items-center gap-1.5"><MapPin size={12} /> {location.coordinates}</span>
+        </div>
+
+        {/* Health badge + era toggle row */}
+        <div className="mt-5 flex flex-wrap items-center gap-4">
+          <EraToggle era={era} setEra={setEra} />
+          <HealthBadge location={location} />
+        </div>
+
+        {/* Play button + waveform */}
+        <div className="mt-6 flex items-center gap-4">
+          <button onClick={onTogglePlay} disabled={ttsLoading}
+            className="grid h-14 w-14 shrink-0 place-items-center rounded-full border-[6px] border-forest/15 bg-sage text-card shadow-[0_0_0_1px_rgba(67,83,58,.2)] transition hover:scale-105 disabled:opacity-60"
+            aria-label={ttsLoading ? "Loading…" : playing ? "Pause" : "Play narration"}>
+            {ttsLoading
+              ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-card border-t-transparent" />
+              : playing
+              ? <Pause fill="currentColor" size={20} />
+              : <Play  fill="currentColor" size={20} className="ml-0.5" />}
+          </button>
+          <div className="min-w-0 flex-1 text-sage">
+            <Waveform playing={playing && !ttsLoading} large />
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="my-7 h-px bg-forest/12" />
+
+        {/* Opening quote mark */}
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`${location.id}-${era}-${liveNarration ? "live" : "static"}`}
+            initial={{ opacity: 0, y: 12 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.45, ease: "easeOut" }}
+          >
+        <span className="font-display text-5xl leading-none text-rust/70">"</span>
+
+        {/* Loading state */}
+        {narrationLoading && !liveNarration && (
+          <div className="mb-4 flex items-center gap-2 text-ink/40">
+            {[0,1,2].map((i) => (
+              <span key={i} className="h-1.5 w-1.5 animate-bounce rounded-full bg-forest/40"
+                style={{ animationDelay: `${i * 150}ms` }} />
+            ))}
+            <span className="font-ui text-xs">The river is speaking…</span>
+          </div>
+        )}
+
+        {/* Narration text */}
+        <div className="max-w-[60ch] space-y-4">
+          {paragraphs.map((para, i) => {
+            const isFirst = i === 0;
+            const isLast  = i === paragraphs.length - 1 && !narrationLoading;
+            return (
+              <p key={i} className={
+                isFirst
+                  ? "font-display text-xl font-medium leading-8 text-ink"
+                  : isLast
+                  ? "font-display text-base font-semibold leading-7 text-forest"
+                  : "font-display text-base leading-7 text-ink/75"
+              }>
+                {para}
+                {narrationLoading && i === paragraphs.length - 1 && (
+                  <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-forest/50 align-middle" />
+                )}
+              </p>
+            );
+          })}
+        </div>
+
+        {/* Closing quote + signature */}
+        <div className="mt-4 flex items-end justify-between">
+          <span className="font-display text-5xl leading-none text-rust/70">"</span>
+          <p className="font-ui text-xs text-ink/35">— {location.name}</p>
+        </div>
+
+        {/* Data badge */}
+        {(liveNarration && !narrationLoading) && (
+          <p className="mt-4 flex items-center gap-1.5 font-ui text-[10px] text-ink/35">
+            <span className="h-1.5 w-1.5 rounded-full bg-statusGood" />
+            Generated from today's real environmental data
+          </p>
+        )}
+        {(!liveNarration && !narrationLoading) && (
+          <p className="mt-4 font-ui text-[10px] italic text-ink/30">Generated from real environmental data</p>
+        )}
+          </motion.div>
+        </AnimatePresence>
+      </div>
+    </div>
+  );
+}
+
+// ─── letter composer ──────────────────────────────────────────────────────────
+
+function LetterComposer({ location, addLetter }: {
+  location: LocationReading;
+  addLetter?: (entry: Omit<import("@/components/EchoEarthShell").LetterEntry, "id" | "sentAt">) => void;
+}) {
+  const [letter,       setLetter]       = useState(`Dear ${location.name},\n`);
+  const [name,         setName]         = useState("");
+  const [response,     setResponse]     = useState("");
+  const [replyLoading, setReplyLoading] = useState(false);
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    setLetter(`Dear ${location.name},\n`);
+    setName(""); setResponse("");
+  }, [location.id]);
+
+  async function handleSend(e: FormEvent) {
+    e.preventDefault();
+    if (!letter.trim() || replyLoading) return;
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+    setResponse(""); setReplyLoading(true);
+
+    try {
+      const res = await fetch("/api/letter-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          locationName: location.name, locationId: location.id,
+          era: "Today", metrics: location.metrics,
+          liveMetrics: null, letterBody: letter, authorName: name,
+        }),
+        signal: abort.signal,
+      });
+
+      if (!res.ok || !res.body) {
+        setResponse("The river is quiet right now. Try again in a moment.");
+        setReplyLoading(false); return;
+      }
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done || abort.signal.aborted) break;
+        acc += decoder.decode(value, { stream: true });
+        setResponse(acc);
+      }
+      addLetter?.({
+        locationId: location.id, era: "Today" as import("@/data/locations").Era,
+        locationName: location.name, authorName: name.trim(), body: letter, reply: acc,
+      });
+    } catch (err: unknown) {
+      if ((err as { name?: string })?.name !== "AbortError")
+        setResponse("The river is quiet right now. Try again in a moment.");
+    } finally { setReplyLoading(false); }
+  }
+
+  return (
+    <div className="border-t border-forest/10 bg-[#f6eedb]">
+      <div className="px-8 py-7 lg:px-12">
+        {/* header */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="flex items-center gap-2 font-display text-xl font-semibold text-rust">
+              <PencilLine size={20} strokeWidth={1.5} />
+              Write a letter back
+            </h2>
+            <p className="mt-0.5 font-ui text-xs text-ink/55">
+              Your words matter. The places you love are listening.
+            </p>
+          </div>
+        </div>
+
+        {/* form */}
+        <form onSubmit={handleSend} className="mt-5">
+          {/* Letter paper */}
+          <div className="relative rounded-sm border border-forest/15 bg-card shadow-[0_2px_8px_rgba(60,48,28,.08)]">
+            {/* stamp decoration */}
+            <div className="absolute right-3 top-3 grid h-14 w-12 place-items-center rounded-sm border border-dashed border-forest/30 bg-[#f6eedb]">
+              <Leaf size={20} strokeWidth={1.1} className="text-sage/60" />
+            </div>
+            <textarea value={letter} onChange={(e) => setLetter(e.target.value)} rows={5}
+              className="lined-paper w-full resize-none rounded-sm bg-transparent px-5 py-4 pr-16 font-hand text-xl leading-8 text-ink outline-none"
+              aria-label={`Letter to ${location.name}`} />
+          </div>
+
+          <div className="mt-4 flex items-center justify-between gap-4">
+            <label className="flex min-w-0 flex-1 items-center gap-2 font-ui text-xs text-ink/45">
+              <span className="shrink-0">Your name</span>
+              <input value={name} onChange={(e) => setName(e.target.value)}
+                className="min-w-0 flex-1 border-b border-forest/20 bg-transparent pb-0.5 text-ink/70 outline-none placeholder:text-ink/30"
+                placeholder="(optional)" />
+            </label>
+            <button type="submit" disabled={replyLoading}
+              className="inline-flex items-center gap-2 rounded-lg bg-forest px-5 py-2.5 font-ui text-sm font-medium text-card shadow-sm transition hover:bg-sage disabled:opacity-60">
+              {replyLoading ? "Sending…" : <><Send size={14} /> Send Letter</>}
+            </button>
+          </div>
+        </form>
+
+        {/* reply — scrollable if long */}
+        {response && (
+          <div className="relative mt-6 max-h-72 overflow-y-auto rounded-sm border border-rust/20 bg-[#fdf4e3] p-5 shadow-[0_2px_8px_rgba(60,48,28,.08)]">
+            {/* washi tape */}
+            <div className="absolute -top-2.5 left-1/2 h-5 w-20 -translate-x-1/2 rotate-[-2deg] rounded-sm bg-[#d8c99f]/70" />
+            <p className="font-hand text-xl text-rust">A reply from {location.name}</p>
+            <p className="mt-2 whitespace-pre-wrap font-display text-base leading-7 text-ink">
+              {response}
+              {replyLoading && (
+                <span className="ml-0.5 inline-block h-[1em] w-[2px] animate-pulse bg-rust/50 align-middle" />
+              )}
+            </p>
+            {!replyLoading && (
+              <p className="mt-4 font-ui text-[10px] uppercase tracking-[.1em] text-ink/35">
+                AI reply · grounded in live environmental data
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* bottom padding for comfortable scroll */}
+        <div className="h-8" />
+      </div>
+    </div>
+  );
+}
+
+// ─── root ─────────────────────────────────────────────────────────────────────
 
 export default function NarrationExperience() {
-  const { locationId, era, setEra, location, searchLocation } = useEchoEarth();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const { locationId, era, setEra, setLocationId, searchLocation, addJournalEntry, addLetter } = useEchoEarth();
 
-  const [screen, setScreen] = useState<Screen>("search");
-  const [query, setQuery] = useState(location.subtitle);
-  const [playing, setPlaying] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
+  const [liveReading,      setLiveReading]      = useState<LocationReading | null>(null);
+  const [liveNarration,    setLiveNarration]     = useState("");
+  const [narrationLoading, setNarrationLoading]  = useState(false);
+  const [playing,          setPlaying]           = useState(false);
+  const [menuOpen,         setMenuOpen]          = useState(false);
+  const [searchOpen,       setSearchOpen]        = useState(false);
+  const [ambientOn,        setAmbientOn]         = useState(false);
+  // Mobile: which tab is active — "story" | "data" | "letter"
+  const [mobileTab,        setMobileTab]         = useState<"story" | "data" | "letter">("story");
+  const appliedRef = useRef(false);
+  const abortRef   = useRef<AbortController | null>(null);
 
-  function handleSearch(event: FormEvent) {
-    event.preventDefault();
+  const staticReading  = getLocationReading(locationId, era);
+  const currentReading = liveReading ?? staticReading;
 
-    searchLocation(query);
-    setScreen("data");
+  // Apply URL params on first mount
+  useEffect(() => {
+    if (appliedRef.current) return;
+    appliedRef.current = true;
+    const paramLoc = searchParams.get("location");
+    const paramEra = searchParams.get("era") as Era | null;
+    const validEras: Era[] = ["1976", "Today", "2050"];
+    if (paramLoc && paramLoc in LOCATION_READINGS) setLocationId(paramLoc);
+    if (paramEra && validEras.includes(paramEra))   setEra(paramEra);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Sync URL
+  useEffect(() => {
+    const params = new URLSearchParams({ location: locationId, era });
+    router.replace(`/narration?${params.toString()}`, { scroll: false });
+  }, [locationId, era, router]);
+
+  // Fetch live data + stream narration
+  useEffect(() => {
     setPlaying(false);
+    setLiveReading(null);
+    setLiveNarration("");
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+
+    async function loadLiveData() {
+      try {
+        const locRes = await fetch(`/api/location?id=${locationId}&era=${era}`, { signal: abort.signal });
+        if (!locRes.ok || abort.signal.aborted) return;
+        const enriched: LocationReading & { liveMetrics: unknown } = await locRes.json();
+        setLiveReading(enriched);
+
+        if (era !== "Today") return;
+
+        setNarrationLoading(true);
+        const narRes = await fetch("/api/narration", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            locationId, era,
+            locationName: enriched.name, subtitle: enriched.subtitle,
+            headline: enriched.headline, metrics: enriched.metrics,
+            liveMetrics: (enriched as { liveMetrics: unknown }).liveMetrics ?? null,
+            summary: enriched.summary,
+          }),
+          signal: abort.signal,
+        });
+
+        if (!narRes.ok || !narRes.body || abort.signal.aborted) { setNarrationLoading(false); return; }
+
+        const reader  = narRes.body.getReader();
+        const decoder = new TextDecoder();
+        let acc = "";
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done || abort.signal.aborted) break;
+          acc += decoder.decode(value, { stream: true });
+          setLiveNarration(acc);
+        }
+        setNarrationLoading(false);
+      } catch (err: unknown) {
+        if ((err as { name?: string })?.name === "AbortError") return;
+        console.error("[NarrationExperience]", err);
+        setNarrationLoading(false);
+      }
+    }
+
+    loadLiveData();
+    return () => { abort.abort(); };
+  }, [locationId, era]);
+
+  const togglePlay = () => setPlaying((v) => !v);
+
+  function handleSelect(query: string) { searchLocation(query); setPlaying(false); }
+  function handleShare() {
+    const url = `${window.location.origin}/narration?location=${locationId}&era=${era}`;
+    const ogUrl = `${window.location.origin}/api/og?location=${locationId}&era=${era}`;
+    // Copy the narration URL — the OG meta will auto-attach the preview card
+    navigator.clipboard.writeText(url).catch(() => {
+      if (navigator.share) navigator.share({
+        title: `${currentReading.name} — EchoEarth`,
+        text: currentReading.narration.split(/[.!?]/)[0].trim() + ".",
+        url,
+      });
+    });
+    // Pre-fetch the OG image so it's cached for when shared
+    fetch(ogUrl, { method: "HEAD" }).catch(() => {});
   }
 
-  function togglePlayback() {
-    setPlaying((value) => !value);
-  }
+  const ttsText = (era === "Today" && liveNarration) ? liveNarration : currentReading.narration;
+  const { loading: ttsLoading } = useElevenLabsAudio(ttsText, locationId, playing, () => setPlaying(false));
 
-  const currentReading = getLocationReading(locationId, era);
+  // Ambient river sound
+  useAmbientSound(ambientOn);
 
   return (
-    <div className="min-h-screen bg-paper text-ink">
-      <PaperTexture />
+    <div className="flex h-screen overflow-hidden bg-paper text-ink">
+      {/* Paper texture overlay */}
+      <div className="paper-texture pointer-events-none fixed inset-0 z-50" aria-hidden="true" />
 
-      <Sidebar open={menuOpen} setOpen={setMenuOpen} />
+      <NavSidebar open={menuOpen} setOpen={setMenuOpen} />
 
-      <main className="relative z-10 min-h-screen lg:ml-64">
-        <header className="flex items-center gap-4 px-5 py-5 sm:px-9 lg:px-12">
-          <button
-            onClick={() => setMenuOpen(true)}
-            className="text-forest lg:hidden"
-            aria-label="Open menu"
-          >
-            <Menu />
-          </button>
+      {menuOpen && (
+        <div className="fixed inset-0 z-40 bg-ink/20 lg:hidden"
+          onClick={() => setMenuOpen(false)} aria-hidden="true" />
+      )}
 
-          <SearchBar
-            location={query}
-            onChange={setQuery}
-            onSubmit={handleSearch}
-          />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <TopBar location={currentReading}
+          onMenuOpen={() => setMenuOpen(true)}
+          onSearch={() => setSearchOpen(true)}
+          onSave={addJournalEntry}
+          onShare={handleShare}
+          ambientOn={ambientOn}
+          onAmbientToggle={() => setAmbientOn((v) => !v)} />
 
-          <div className="hidden items-center gap-5 font-ui text-sm text-ink/80 sm:flex">
-            <button
-              type="button"
-              className="flex items-center gap-1.5 hover:text-rust"
-            >
-              <BookOpen size={18} />
-              Sources
-            </button>
+        {/* Three-panel layout */}
+        <div className="flex min-h-0 flex-1">
 
-            <button
-              type="button"
-              className="flex items-center gap-1.5 hover:text-rust"
-            >
-              <Share2 size={18} />
-              Share
-            </button>
+          {/* Center: narration + letter — single scrollable column */}
+          <div className="min-w-0 flex-1 overflow-y-auto pb-16 lg:pb-0">
+            {/* ── Desktop: always show story + letter ── */}
+            <div className="hidden lg:block">
+              <NarrationHero
+                location={currentReading} era={era} setEra={setEra}
+                playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
+                liveNarration={liveNarration} narrationLoading={narrationLoading} />
+              <LetterComposer location={currentReading} addLetter={addLetter} />
+            </div>
+
+            {/* ── Mobile: tab-controlled ── */}
+            <div className="lg:hidden">
+              <AnimatePresence mode="wait">
+                {mobileTab === "story" && (
+                  <motion.div key="story"
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
+                    <NarrationHero
+                      location={currentReading} era={era} setEra={setEra}
+                      playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
+                      liveNarration={liveNarration} narrationLoading={narrationLoading} />
+                  </motion.div>
+                )}
+                {mobileTab === "data" && (
+                  <motion.div key="data"
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
+                    <div className="px-4 py-5">
+                      <ConditionPanel location={currentReading} />
+                    </div>
+                  </motion.div>
+                )}
+                {mobileTab === "letter" && (
+                  <motion.div key="letter"
+                    initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
+                    <LetterComposer location={currentReading} addLetter={addLetter} />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </header>
 
-        <div className="px-5 pb-14 pt-8 sm:px-9 lg:px-12 lg:pt-10">
-          <div className="mb-8 flex items-center gap-3 overflow-x-auto pb-2 font-ui text-[10px] uppercase tracking-[.15em] text-ink/50">
-            {(
-              ["search", "data", "narration", "time", "letter"] as Screen[]
-            ).map((item, index) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setScreen(item)}
-                className={`whitespace-nowrap ${
-                  screen === item ? "text-rust" : ""
-                }`}
+          {/* Right: metrics + chart — desktop only */}
+          <div className="hidden w-80 shrink-0 overflow-hidden border-l border-forest/10 xl:block">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`panel-${locationId}-${era}`}
+                initial={{ opacity: 0, x: 10 }}
+                animate={{ opacity: 1, x: 0 }}
+                exit={{ opacity: 0, x: -10 }}
+                transition={{ duration: 0.35, ease: "easeOut" }}
+                className="h-full"
               >
-                {index + 1}. {item}
-              </button>
-            ))}
+                <ConditionPanel location={currentReading} />
+              </motion.div>
+            </AnimatePresence>
           </div>
-
-          {screen === "search" && (
-            <>
-              <StageHeader screen={screen} />
-
-              <section className="grid min-h-[55vh] place-items-center text-center">
-                <div>
-                  <p className="font-hand text-3xl text-rust">
-                    Every place has a record.
-                  </p>
-
-                  <h1 className="mt-4 font-display text-5xl leading-tight text-forest sm:text-7xl">
-                    Let a place tell it.
-                  </h1>
-
-                  <p className="mx-auto mt-5 max-w-lg font-ui text-sm leading-6 text-ink/70">
-                    Enter a place, reveal the real environmental signals, then
-                    listen to a data-grounded voice.
-                  </p>
-
-                  <form
-                    onSubmit={handleSearch}
-                    className="mx-auto mt-8 flex max-w-xl items-center rounded-lg border border-forest/20 bg-card p-2 shadow-paper"
-                  >
-                    <MapPin className="ml-2 text-rust" />
-
-                    <input
-                      value={query}
-                      onChange={(event) => setQuery(event.target.value)}
-                      className="min-w-0 flex-1 bg-transparent px-3 py-3 font-ui text-sm outline-none"
-                      placeholder="Try Yamuna River, Delhi"
-                    />
-
-                    <button
-                      type="submit"
-                      className="rounded-md bg-forest px-5 py-3 font-ui text-sm text-card"
-                    >
-                      Reveal record
-                    </button>
-                  </form>
-
-                  <div className="mt-5 flex flex-wrap justify-center gap-2">
-                    {[
-                      "Yamuna River, Delhi",
-                      "Ganga River, Rishikesh",
-                      "Dal Lake, Srinagar",
-                    ].map((place) => (
-                      <button
-                        key={place}
-                        type="button"
-                        onClick={() => setQuery(place)}
-                        className="rounded-full border border-forest/15 px-3 py-1.5 font-ui text-xs text-ink/70 hover:border-rust hover:text-rust"
-                      >
-                        {place}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </section>
-            </>
-          )}
-
-          {screen !== "search" && (
-            <>
-              <StageHeader screen={screen} />
-
-              <div className="grid gap-10 xl:grid-cols-[minmax(0,1fr)_350px]">
-                <div>
-                  <Hero location={currentReading} />
-
-                  <div className="mt-10 xl:hidden">
-                    <Snapshot location={currentReading} />
-                  </div>
-
-                  {screen === "data" && (
-                    <div className="mt-9 max-w-2xl">
-                      <MiniChart location={currentReading} />
-
-                      <p className="mt-7 font-display text-xl leading-8 text-ink/85">
-                        {currentReading.summary}
-                      </p>
-
-                      <button
-                        onClick={() => setScreen("narration")}
-                        className="mt-7 inline-flex items-center gap-2 rounded-md bg-forest px-5 py-3 font-ui text-sm text-card"
-                      >
-                        Hear the narration
-                        <Play size={15} fill="currentColor" />
-                      </button>
-                    </div>
-                  )}
-
-                  {["narration", "time", "letter"].includes(screen) && (
-                    <AudioNarration
-                      location={currentReading}
-                      playing={playing}
-                      onToggle={togglePlayback}
-                    />
-                  )}
-
-                  {screen === "time" && (
-                    <TimeControl era={era} setEra={setEra} />
-                  )}
-
-                  {screen === "letter" && (
-                    <LetterComposer location={currentReading} />
-                  )}
-
-                  {screen === "narration" && (
-                    <div className="mt-10 grid gap-7 xl:grid-cols-2">
-                      <TimeControl era={era} setEra={setEra} />
-
-                      <div className="self-end border-l-2 border-rust pl-5 font-display text-lg leading-7 text-ink/80">
-                        The voice is never separate from the record: every line
-                        should be traceable to the numbers beside it.
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="hidden xl:block">
-                  <Snapshot location={currentReading} />
-
-                  <div className="mt-9">
-                    <Landscape />
-                  </div>
-
-                  <div className="mt-5">
-                    <MiniChart location={currentReading} />
-                  </div>
-
-                  <div className="relative z-10 -mt-3 ml-[-2rem] max-w-[260px] rotate-[-1.5deg] border border-rust/15 bg-[#f6e7c5] p-5 shadow-paper">
-                    <h3 className="font-display text-lg text-ink">
-                      What this means
-                    </h3>
-
-                    <p className="mt-2 font-hand text-lg leading-6 text-ink/85">
-                      BOD indicates organic pollution. Lower levels mean clearer
-                      water with more oxygen for aquatic life.
-                    </p>
-
-                    <Botanical className="absolute -bottom-7 right-0 w-24 text-sage/70" />
-                  </div>
-                </div>
-              </div>
-
-              {screen !== "letter" && (
-                <LetterComposer location={currentReading} />
-              )}
-            </>
-          )}
         </div>
-      </main>
+
+        {/* ── Mobile bottom tab bar ── */}
+        <nav className="fixed bottom-0 left-0 right-0 z-30 flex border-t border-forest/12 bg-card/95 backdrop-blur-sm lg:hidden">
+          {([
+            { id: "story",  label: "Story",   icon: <Leaf      size={18} strokeWidth={1.4} /> },
+            { id: "data",   label: "Data",    icon: <Waves     size={18} strokeWidth={1.4} /> },
+            { id: "letter", label: "Letter",  icon: <Send      size={18} strokeWidth={1.4} /> },
+          ] as const).map(({ id, label, icon }) => (
+            <button key={id} onClick={() => setMobileTab(id)}
+              className={`flex flex-1 flex-col items-center gap-1 py-3 font-ui text-[10px] font-medium uppercase tracking-[.1em] transition ${
+                mobileTab === id ? "text-forest" : "text-ink/40"
+              }`}>
+              <span className={mobileTab === id ? "text-forest" : "text-ink/35"}>{icon}</span>
+              {label}
+              {mobileTab === id && (
+                <span className="absolute bottom-0 h-0.5 w-10 rounded-t-full bg-forest" />
+              )}
+            </button>
+          ))}
+
+          {/* Play button in tab bar */}
+          <button onClick={togglePlay} disabled={ttsLoading}
+            className="flex flex-1 flex-col items-center gap-1 py-3 font-ui text-[10px] font-medium uppercase tracking-[.1em] text-ink/40 transition disabled:opacity-40">
+            <span className={`grid h-7 w-7 place-items-center rounded-full ${playing ? "bg-rust text-card" : "bg-forest/10 text-forest"}`}>
+              {ttsLoading
+                ? <span className="h-3 w-3 animate-spin rounded-full border-2 border-forest/40 border-t-transparent" />
+                : playing
+                ? <Pause size={12} fill="currentColor" />
+                : <Play  size={12} fill="currentColor" className="ml-[1px]" />}
+            </span>
+            {ttsLoading ? "Loading" : playing ? "Pause" : "Listen"}
+          </button>
+        </nav>
+      </div>
+
+      <SearchOverlay open={searchOpen} onClose={() => setSearchOpen(false)} onSelect={handleSelect} />
     </div>
   );
 }
