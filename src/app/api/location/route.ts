@@ -1,10 +1,13 @@
 /**
  * GET /api/location?id=ganga&era=Today
  *
- * Returns the static LocationReading merged with live Open-Meteo metrics.
- * The temperature metric is replaced with the real current value.
- * Other static metrics (DO, BOD, plastic) remain as research-sourced baselines
- * until live sensor APIs become available for those parameters.
+ * Returns a LocationReading enriched with live data from:
+ *   - Open-Meteo Weather (temperature, precipitation, weather)
+ *   - Open-Meteo Air Quality (PM2.5, PM10, AQI, UV)
+ *   - Derived dissolved oxygen (Benson-Krause + PM2.5 proxy)
+ *   - USGS Water Services for US rivers (discharge)
+ *
+ * Historical (1976) and projected (2050) eras return static data only.
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -22,10 +25,9 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Invalid era" }, { status: 400 });
   }
 
-  // Base static reading
   const base = getLocationReading(id, era);
 
-  // Only fetch live metrics for "Today" — 1976 and 2050 are historical/projected
+  // Historical and projected eras use curated research data only
   if (era !== "Today") {
     return NextResponse.json({ ...base, liveMetrics: null });
   }
@@ -33,24 +35,45 @@ export async function GET(req: NextRequest) {
   try {
     const live = await fetchLiveMetrics(id);
 
-    // Replace temperature metric with live value
+    // Enrich metrics with all available live values
     const metrics = base.metrics.map((m) => {
-      if (m.label.toLowerCase().includes("temperature")) {
+      const label = m.label.toLowerCase();
+
+      // Temperature — live from Open-Meteo
+      if (label.includes("temperature")) {
         const t = live.temperatureC;
-        const status =
-          t > 30 ? "(High)" :
-          t > 26 ? "(Watch)" :
-          "(Surface)";
-        const statusColor =
-          t > 30 ? "high" as const :
-          t > 26 ? "moderate" as const :
-          "good" as const;
-        return { ...m, value: `${t.toFixed(1)} °C`, status, statusColor };
+        return {
+          ...m,
+          value: `${t.toFixed(1)} °C`,
+          status: t > 30 ? "(High — Heat Stress)" : t > 26 ? "(Watch)" : "(Surface)",
+          statusColor: (t > 30 ? "high" : t > 26 ? "moderate" : "good") as typeof m.statusColor,
+          live: true,
+        };
       }
+
+      // Dissolved Oxygen — derived from live temperature + PM2.5
+      if (label.includes("oxygen") && live.dissolvedOxygenMgL !== null) {
+        const do_ = live.dissolvedOxygenMgL;
+        return {
+          ...m,
+          value: `${do_} mg/L`,
+          status: do_ < 2 ? "Critical" : do_ < 4 ? "Low" : do_ < 6 ? "Watch" : "Good",
+          statusColor: (do_ < 2 ? "high" : do_ < 4 ? "high" : do_ < 6 ? "moderate" : "good") as typeof m.statusColor,
+          live: true,
+        };
+      }
+
+      // pH — if precipitation is high, slight acidification proxy
+      if (label.includes("ph") && live.precipitationMm > 5) {
+        // Heavy rainfall slightly lowers surface pH — minor adjustment only
+        const basePh = parseFloat(m.value.replace(/[^0-9.]/g, "")) || 7.5;
+        const adjusted = Math.round((basePh - 0.1) * 10) / 10;
+        return { ...m, value: adjusted.toFixed(1) };
+      }
+
       return m;
     });
 
-    // Build an enriched updatedAt timestamp
     const updatedAt = new Date(live.fetchedAt).toLocaleString("en-IN", {
       day: "numeric", month: "short", year: "numeric",
       hour: "2-digit", minute: "2-digit", timeZoneName: "short",
@@ -65,7 +88,6 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("[api/location] live fetch failed:", err);
-    // Degrade gracefully — return static data
     return NextResponse.json({ ...base, liveMetrics: null });
   }
 }

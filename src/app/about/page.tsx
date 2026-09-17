@@ -2,56 +2,15 @@
 
 import Link from "next/link";
 import {
-  BookOpen,
   Database,
   ExternalLink,
   Globe,
-  Info,
   Leaf,
-  Mail,
-  MapPin,
   Microscope,
   ShieldCheck,
   Waves,
 } from "lucide-react";
-
-type AppRoute = "/narration" | "/map" | "/journal" | "/letters" | "/about";
-
-function NavSidebar() {
-  const items: { route: AppRoute; label: string; Icon: typeof Leaf }[] = [
-    { route: "/narration", label: "Narration",  Icon: Leaf     },
-    { route: "/map",       label: "Map",        Icon: MapPin   },
-    { route: "/journal",   label: "Journal",    Icon: BookOpen },
-    { route: "/about",     label: "About",      Icon: Info     },
-    { route: "/letters",   label: "Collection", Icon: Mail     },
-  ];
-  return (
-    <nav className="hidden w-44 shrink-0 flex-col border-r border-forest/10 bg-sidebar px-5 py-7 lg:flex">
-      <div className="mb-7 flex items-center gap-2">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-forest/20 bg-card">
-          <Leaf size={15} strokeWidth={1.4} className="text-forest" />
-        </div>
-        <span className="font-display text-base font-semibold tracking-tight text-forest">EchoEarth</span>
-      </div>
-      <p className="mb-6 font-ui text-[10px] leading-[1.5] text-ink/50">
-        Every place has a voice.<br />Listen. Learn. Love.
-      </p>
-      <div className="space-y-0.5">
-        {items.map(({ route, label, Icon }) => (
-          <Link
-            key={route}
-            href={route}
-            className={`flex items-center gap-2.5 rounded px-2 py-2 font-ui text-[11px] font-medium uppercase tracking-[.1em] transition hover:bg-forest/5 hover:text-forest ${
-              route === "/about" ? "bg-forest/8 text-forest" : "text-ink/55"
-            }`}
-          >
-            <Icon size={13} strokeWidth={1.5} />{label}
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
+import NavSidebar from "@/components/NavSidebar";
 
 const SOURCES = [
   {
@@ -90,13 +49,25 @@ const SOURCES = [
     url: "https://jkpcc.nic.in",
     icon: Database,
   },
+  {
+    name: "Open-Meteo (Weather & Air Quality)",
+    description: "Real-time temperature, precipitation, PM2.5, PM10, and European AQI — free, no API key.",
+    url: "https://open-meteo.com",
+    icon: Globe,
+  },
+  {
+    name: "USGS Water Services",
+    description: "Real-time stream discharge data for US rivers including the Colorado.",
+    url: "https://waterservices.usgs.gov",
+    icon: Waves,
+  },
 ];
 
 const METHODOLOGY = [
   {
     step: "01",
     title: "Data collection",
-    body: "Environmental metrics are sourced from government monitoring agencies and satellite datasets. Where live APIs are unavailable, the most recent published reference values are used.",
+    body: "Environmental metrics are sourced from government monitoring agencies, satellite datasets, and real-time open APIs. Temperature and air quality (PM2.5, PM10, European AQI) are fetched live from Open-Meteo — free, no key required, updated every 30 minutes.",
   },
   {
     step: "02",
@@ -105,18 +76,23 @@ const METHODOLOGY = [
   },
   {
     step: "03",
+    title: "Live dissolved oxygen derivation",
+    body: "Dissolved oxygen is estimated in real time using the Benson–Krause equation (APHA Standard Methods), which models O₂ saturation from live water temperature, adjusted by a pollution multiplier derived from the live PM2.5 reading and the location's research baseline.",
+  },
+  {
+    step: "04",
     title: "Era projections",
     body: "The 1976 era uses published historical reference datasets. The 2050 era is a scenario projection based on IPCC SSP2-4.5 warming trajectories combined with current pollution trends — not a forecast.",
   },
   {
-    step: "04",
+    step: "05",
     title: "Narration generation",
-    body: "Each location's narration is written to be data-grounded: every claim in the voice of the place is traceable to at least one displayed metric. Narrations are reviewed for factual accuracy.",
+    body: "Each location's narration is AI-generated using Groq (Qwen model) and grounded in live + research metrics. Every claim is traceable to a displayed data point. The narration ends with 3 specific, actionable asks from the river.",
   },
   {
-    step: "05",
+    step: "06",
     title: "Transparency",
-    body: "Data sources and update timestamps are shown alongside every reading. Projected values are clearly labelled. No metric is presented without its origin.",
+    body: "Data sources and update timestamps are shown alongside every reading. Live metrics carry a green 'Live' badge. Research baselines are clearly labelled. Projected values are always marked as scenarios.",
   },
 ];
 

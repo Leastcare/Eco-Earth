@@ -3,19 +3,18 @@
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useState } from "react";
 import {
-  BookOpen,
   Dna,
-  Info,
-  Leaf,
-  Mail,
-  MapPin,
+  Map as MapIcon,
   Waves,
+  X,
 } from "lucide-react";
 import { LOCATION_READINGS, type Era } from "@/data/locations";
 import { useEchoEarth } from "@/components/EchoEarthShell";
+import NavSidebar from "@/components/NavSidebar";
 
-// ── Leaflet dynamically imported — no SSR ───────────────────────────────────
+// ── Leaflet dynamically imported — no SSR ────────────────────────────────────
 const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ssr: false,
   loading: () => (
@@ -25,9 +24,7 @@ const LeafletMap = dynamic(() => import("@/components/LeafletMap"), {
   ),
 });
 
-type AppRoute = "/narration" | "/map" | "/journal" | "/letters" | "/about";
-
-// ─── helpers ─────────────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
 function healthText(s: string) {
   if (s === "Critical" || s === "Poor") return "text-statusHigh";
@@ -47,41 +44,6 @@ function healthBg(s: string) {
   return "border-statusGood/25 bg-statusGood/8";
 }
 
-// ─── nav ─────────────────────────────────────────────────────────────────────
-
-function NavSidebar() {
-  const items: { route: AppRoute; label: string; Icon: typeof Leaf }[] = [
-    { route: "/narration", label: "Narration",  Icon: Leaf     },
-    { route: "/map",       label: "Map",        Icon: MapPin   },
-    { route: "/journal",   label: "Journal",    Icon: BookOpen },
-    { route: "/about",     label: "About",      Icon: Info     },
-    { route: "/letters",   label: "Collection", Icon: Mail     },
-  ];
-  return (
-    <nav className="hidden w-44 shrink-0 flex-col border-r border-forest/10 bg-sidebar px-5 py-7 lg:flex">
-      <div className="mb-7 flex items-center gap-2">
-        <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full border border-forest/20 bg-card">
-          <Leaf size={15} strokeWidth={1.4} className="text-forest" />
-        </div>
-        <span className="font-display text-base font-semibold tracking-tight text-forest">EchoEarth</span>
-      </div>
-      <p className="mb-6 font-ui text-[10px] leading-[1.5] text-ink/50">
-        Every place has a voice.<br />Listen. Learn. Love.
-      </p>
-      <div className="space-y-0.5">
-        {items.map(({ route, label, Icon }) => (
-          <Link key={route} href={route}
-            className={`flex items-center gap-2.5 rounded px-2 py-2 font-ui text-[11px] font-medium uppercase tracking-[.1em] transition hover:bg-forest/5 hover:text-forest ${
-              route === "/map" ? "bg-forest/8 text-forest" : "text-ink/55"
-            }`}>
-            <Icon size={13} strokeWidth={1.5} />{label}
-          </Link>
-        ))}
-      </div>
-    </nav>
-  );
-}
-
 // ─── health ring ──────────────────────────────────────────────────────────────
 
 function HealthRing({ index, status, size = 56 }: { index: number; status: string; size?: number }) {
@@ -90,14 +52,14 @@ function HealthRing({ index, status, size = 56 }: { index: number; status: strin
   const fill = (index / 100) * circ;
   return (
     <svg width={size} height={size} className="shrink-0 -rotate-90">
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke="rgba(44,42,36,.08)" strokeWidth={4} />
-      <circle cx={size/2} cy={size/2} r={r} fill="none" stroke={healthRingColor(status)} strokeWidth={4}
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="rgba(44,42,36,.08)" strokeWidth={4} />
+      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={healthRingColor(status)} strokeWidth={4}
         strokeDasharray={`${fill} ${circ}`} strokeLinecap="round" />
     </svg>
   );
 }
 
-// ─── location card ────────────────────────────────────────────────────────────
+// ─── location card ─────────────────────────────────────────────────────────────
 
 function LocationCard({ locationId, era, active, onSelect }: {
   locationId: string; era: Era; active: boolean; onSelect: () => void;
@@ -117,7 +79,7 @@ function LocationCard({ locationId, era, active, onSelect }: {
           <p className="font-ui text-[9px] font-semibold uppercase tracking-[.15em] text-ink/40">{r.type}</p>
           <h3 className="mt-0.5 font-display text-base font-bold leading-tight text-ink">{r.name}</h3>
           <p className="mt-0.5 flex items-center gap-1 font-ui text-[11px] text-ink/45">
-            <MapPin size={9} />{r.subtitle}
+            <span>📍</span>{r.subtitle}
           </p>
         </div>
         <div className="relative shrink-0">
@@ -128,7 +90,6 @@ function LocationCard({ locationId, era, active, onSelect }: {
           </div>
         </div>
       </div>
-
       {/* status badge */}
       <div className={`mt-2.5 inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 ${healthBg(r.healthStatus)}`}>
         <span className={`h-1.5 w-1.5 rounded-full ${
@@ -139,12 +100,11 @@ function LocationCard({ locationId, era, active, onSelect }: {
           {r.healthStatus}
         </span>
       </div>
-
       {/* metrics */}
       <div className="mt-3 space-y-1.5">
         {preview.map((m) => (
           <div key={m.label} className="flex items-center justify-between gap-2">
-            <span className="font-ui text-[10px] text-ink/50 truncate">{m.label}</span>
+            <span className="truncate font-ui text-[10px] text-ink/50">{m.label}</span>
             <span className={`shrink-0 font-ui text-[10px] font-semibold ${
               m.statusColor === "good" ? "text-statusGood" :
               m.statusColor === "moderate" ? "text-statusModerate" : "text-statusHigh"
@@ -152,7 +112,6 @@ function LocationCard({ locationId, era, active, onSelect }: {
           </div>
         ))}
       </div>
-
       {/* footer */}
       <div className="mt-3 flex items-center justify-between border-t border-forest/8 pt-2.5">
         <p className="font-ui text-[9px] text-ink/30">{r.coordinates}</p>
@@ -164,7 +123,7 @@ function LocationCard({ locationId, era, active, onSelect }: {
   );
 }
 
-// ─── geo coords for pins ──────────────────────────────────────────────────────
+// ─── geo coords for map pins ──────────────────────────────────────────────────
 
 const PIN_GEO: Record<string, { lat: number; lng: number }> = {
   ganga:        { lat: 25.3,   lng: 83.2   },
@@ -184,11 +143,48 @@ const PIN_GEO: Record<string, { lat: number; lng: number }> = {
   danube:       { lat: 48.2,   lng: 16.4   },
 };
 
-// ─── page ─────────────────────────────────────────────────────────────────────
+// ─── pin type ─────────────────────────────────────────────────────────────────
+
+type PinDef = {
+  id: string;
+  label: string;
+  lat: number;
+  lng: number;
+  status: string;
+  index: number;
+};
+
+// ─── mobile map sheet ─────────────────────────────────────────────────────────
+
+function MobileMapSheet({ pins, activeId, onPin, onClose }: {
+  pins: PinDef[];
+  activeId: string | null;
+  onPin: (id: string) => void;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col bg-paper xl:hidden">
+      {/* header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-forest/10 bg-card/90 px-4 py-3 backdrop-blur-sm">
+        <p className="font-ui text-sm font-semibold text-forest">Interactive Map</p>
+        <button onClick={onClose} className="rounded-full p-1.5 text-ink/50 transition hover:bg-forest/8 hover:text-forest" aria-label="Close map">
+          <X size={18} />
+        </button>
+      </div>
+      {/* map fills remaining space */}
+      <div className="min-h-0 flex-1">
+        <LeafletMap pins={pins} activeId={activeId} onPin={(id) => { onPin(id); onClose(); }} />
+      </div>
+    </div>
+  );
+}
+
+// ─── page ──────────────────────────────────────────────────────────────────────
 
 export default function MapPage() {
   const router = useRouter();
   const { locationId, era, setEra, setLocationId } = useEchoEarth();
+  const [mobileMapOpen, setMobileMapOpen] = useState(false);
   const locationIds = Object.keys(LOCATION_READINGS);
 
   const indian = ["ganga", "yamuna", "dal", "chilika", "brahmaputra", "periyar", "lonar", "wular"];
@@ -222,11 +218,22 @@ export default function MapPage() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* top bar */}
         <header className="flex shrink-0 items-center justify-between border-b border-forest/10 bg-card/80 px-5 py-3 backdrop-blur-sm">
-          <div>
-            <h1 className="font-display text-base font-semibold text-forest">Environmental Map</h1>
-            <p className="font-ui text-[11px] text-ink/50">
-              {locationIds.length} locations monitored worldwide
-            </p>
+          <div className="flex items-center gap-3">
+            {/* Mobile map toggle button */}
+            <button
+              onClick={() => setMobileMapOpen(true)}
+              className="flex items-center gap-1.5 rounded-lg border border-forest/15 bg-card px-3 py-1.5 font-ui text-xs text-forest transition hover:border-forest/30 xl:hidden"
+              aria-label="Open interactive map"
+            >
+              <MapIcon size={13} />
+              <span>Map</span>
+            </button>
+            <div>
+              <h1 className="font-display text-base font-semibold text-forest">Environmental Map</h1>
+              <p className="font-ui text-[11px] text-ink/50">
+                {locationIds.length} locations monitored worldwide
+              </p>
+            </div>
           </div>
           <div className="flex items-center gap-0.5 rounded-full border border-forest/15 bg-paper p-0.5">
             {eras.map(({ value, label }) => (
@@ -242,27 +249,24 @@ export default function MapPage() {
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
 
-          {/* ── Left: real Leaflet map ── */}
+          {/* ── Left: real Leaflet map — desktop only ── */}
           <div className="hidden w-[480px] shrink-0 flex-col gap-3 border-r border-forest/10 p-4 xl:flex">
             <div className="flex items-center justify-between">
               <p className="font-ui text-[10px] font-semibold uppercase tracking-[.18em] text-ink/40">
                 Interactive map
               </p>
               <div className="flex flex-wrap gap-2.5">
-                {(["bg-statusGood","bg-statusModerate","bg-statusHigh"] as const).map((c, i) => (
+                {(["bg-statusGood", "bg-statusModerate", "bg-statusHigh"] as const).map((c, i) => (
                   <span key={i} className="flex items-center gap-1 font-ui text-[9px] text-ink/45">
                     <span className={`h-2 w-2 rounded-full ${c}`} />
-                    {["Good","Moderate","Poor / Critical"][i]}
+                    {["Good", "Moderate", "Poor / Critical"][i]}
                   </span>
                 ))}
               </div>
             </div>
-
-            {/* Map container — takes remaining height */}
             <div className="min-h-0 flex-1 overflow-hidden rounded-xl border border-forest/12 shadow-sm">
               <LeafletMap pins={pins} activeId={locationId} onPin={setLocationId} />
             </div>
-
             <p className="font-ui text-[10px] text-ink/35">
               Click any pin to select · era: <strong className="text-forest">{era}</strong>
             </p>
@@ -271,7 +275,21 @@ export default function MapPage() {
           {/* ── Right: location cards ── */}
           <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
 
-            {/* Indian */}
+            {/* Mobile map hint */}
+            <div className="mb-4 flex items-center gap-2 rounded-lg border border-forest/12 bg-card/60 px-4 py-3 xl:hidden">
+              <MapIcon size={14} className="shrink-0 text-forest/60" />
+              <p className="font-ui text-xs text-ink/55">
+                Tap <strong className="text-forest">Map</strong> above to view the interactive map
+              </p>
+              <button
+                onClick={() => setMobileMapOpen(true)}
+                className="ml-auto shrink-0 rounded-md bg-forest px-3 py-1.5 font-ui text-[11px] font-medium text-card transition hover:bg-sage"
+              >
+                Open map
+              </button>
+            </div>
+
+            {/* Indian subcontinent */}
             <div className="mb-3 flex items-center gap-3">
               <p className="font-ui text-[10px] font-semibold uppercase tracking-[.18em] text-ink/40">Indian subcontinent</p>
               <div className="h-px flex-1 bg-forest/8" />
@@ -283,7 +301,7 @@ export default function MapPage() {
               ))}
             </div>
 
-            {/* World */}
+            {/* World rivers */}
             <div className="mb-3 flex items-center gap-3">
               <p className="font-ui text-[10px] font-semibold uppercase tracking-[.18em] text-ink/40">World rivers</p>
               <div className="h-px flex-1 bg-forest/8" />
@@ -319,7 +337,7 @@ export default function MapPage() {
             )}
 
             {/* Summary stats */}
-            <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5 pb-4">
+            <div className="mt-4 grid grid-cols-3 gap-2 pb-4 sm:grid-cols-5">
               {locationIds.slice(0, 5).map((id) => {
                 const r = LOCATION_READINGS[id]?.[era];
                 if (!r) return null;
@@ -347,6 +365,16 @@ export default function MapPage() {
           </div>
         </div>
       </div>
+
+      {/* Mobile full-screen map sheet */}
+      {mobileMapOpen && (
+        <MobileMapSheet
+          pins={pins}
+          activeId={locationId}
+          onPin={setLocationId}
+          onClose={() => setMobileMapOpen(false)}
+        />
+      )}
     </div>
   );
 }

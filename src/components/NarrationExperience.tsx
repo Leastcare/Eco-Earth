@@ -5,8 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import { FormEvent, useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   BookOpen,
   BookmarkPlus,
+  CheckCircle2,
   Dna,
   Droplets,
   FlaskConical,
@@ -27,6 +29,7 @@ import {
   Waves,
   Wind,
   X,
+  Zap,
 } from "lucide-react";
 import {
   LOCATION_READINGS,
@@ -36,6 +39,7 @@ import {
   type Metric,
 } from "@/data/locations";
 import { useEchoEarth } from "@/components/EchoEarthShell";
+import type { LiveMetrics } from "@/lib/fetchLiveMetrics";
 
 type AppRoute = "/narration" | "/map" | "/journal" | "/letters" | "/about";
 
@@ -179,12 +183,10 @@ function useElevenLabsAudio(
 }
 
 // ─── Ambient river sound hook ─────────────────────────────────────────────────
-// Plays a subtle river/water ambient loop while on the narration page.
-// Uses a royalty-free rain + river sound from a public CDN.
+// Plays a subtle ambient loop while on the narration page.
+// Self-hosted in /public/sounds to avoid external CDN dependency.
 
-const AMBIENT_URL = "https://www.soundjay.com/nature/sounds/river-1.mp3";
-// Fallback CDN in case the above is unavailable
-const AMBIENT_FALLBACK = "https://freesound.org/data/previews/531/531947_4921277-lq.mp3";
+const AMBIENT_URL = "/sounds/river-ambient.mp3";
 
 function useAmbientSound(enabled: boolean) {
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -197,12 +199,6 @@ function useAmbientSound(enabled: boolean) {
       audio.loop = true;
       audio.volume = 0.07; // very subtle — barely perceptible
       audio.preload = "none";
-      // try fallback if primary fails
-      audio.onerror = () => {
-        audio.src = AMBIENT_FALLBACK;
-        audio.load();
-        if (enabled) audio.play().catch(() => {});
-      };
       audioRef.current = audio;
     }
 
@@ -493,7 +489,7 @@ function TrendChart({ location }: { location: LocationReading }) {
 
 // ─── right panel: metrics + chart ────────────────────────────────────────────
 
-function ConditionPanel({ location }: { location: LocationReading }) {
+function ConditionPanel({ location, liveMetrics }: { location: LocationReading; liveMetrics?: LiveMetrics | null }) {
   const isProjection = location.updatedAt.toLowerCase().includes("projected");
 
   // SVG health ring
@@ -523,29 +519,50 @@ function ConditionPanel({ location }: { location: LocationReading }) {
         </div>
       </div>
 
-      {/* header */}
+      {/* Live AQI badge */}
+      {liveMetrics && !isProjection && <AqiBadge liveMetrics={liveMetrics} />}
+
+      {/* header: My Current Condition */}
       <div className="mb-3">
         <h2 className="font-display text-base font-semibold text-ink">My Current Condition</h2>
-        <p className="font-ui text-[10px] italic text-ink/40">
-          {isProjection ? "Projected scenario" : "Live data snapshot"}
-        </p>
+        {isProjection ? (
+          <p className="font-ui text-[10px] italic text-ink/40">Projected scenario</p>
+        ) : (
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            <span className="flex items-center gap-1 font-ui text-[9px] text-statusGood">
+              <span className="h-1.5 w-1.5 rounded-full bg-statusGood inline-block" />
+              Live: Temp · DO · Air Quality
+            </span>
+            <span className="font-ui text-[9px] text-ink/35">Research baseline: Plastic · Flow · pH</span>
+          </div>
+        )}
       </div>
 
       {/* metrics */}
       <div>
-        {location.metrics.map((m) => (
-          <div key={m.label} className="flex items-center gap-2.5 border-b border-forest/8 py-2.5 last:border-b-0">
-            <span className="shrink-0 text-ink/35"><MetricIcon label={m.label} /></span>
-            <div className="min-w-0 flex-1">
-              <p className="font-ui text-[10px] font-semibold uppercase tracking-[.08em] text-ink/45">{m.label}</p>
-              <p className="font-display text-sm font-semibold text-ink">{m.value}</p>
+        {location.metrics.map((m) => {
+          const isLive = (m as { live?: boolean }).live === true;
+          return (
+            <div key={m.label} className="flex items-center gap-2.5 border-b border-forest/8 py-2.5 last:border-b-0">
+              <span className="shrink-0 text-ink/35"><MetricIcon label={m.label} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-1.5">
+                  <p className="font-ui text-[10px] font-semibold uppercase tracking-[.08em] text-ink/45">{m.label}</p>
+                  {isLive && !isProjection && (
+                    <span className="rounded-full bg-statusGood/15 px-1.5 py-px font-ui text-[8px] font-bold uppercase tracking-[.08em] text-statusGood">
+                      Live
+                    </span>
+                  )}
+                </div>
+                <p className="font-display text-sm font-semibold text-ink">{m.value}</p>
+              </div>
+              <div className="flex shrink-0 items-center gap-1.5">
+                <span className={`h-2 w-2 rounded-full ${statusDotClass(m.statusColor)}`} />
+                <span className={`font-ui text-[10px] font-semibold ${statusTextClass(m.statusColor)}`}>{m.status}</span>
+              </div>
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              <span className={`h-2 w-2 rounded-full ${statusDotClass(m.statusColor)}`} />
-              <span className={`font-ui text-[10px] font-semibold ${statusTextClass(m.statusColor)}`}>{m.status}</span>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* source */}
@@ -596,12 +613,153 @@ function HealthBadge({ location }: { location: LocationReading }) {
   );
 }
 
+// ─── take action section ──────────────────────────────────────────────────────
+
+function parseActionItems(narrationText: string): string[] {
+  if (!narrationText.trim()) return [];
+  // The AI narration ends with 3 action asks in the last paragraph.
+  // Split into paragraphs and take the last one, then split by sentence.
+  const paras = narrationText.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
+  const lastPara = paras[paras.length - 1] ?? "";
+  // Split by numbered list pattern or sentence boundaries
+  const numbered = lastPara.match(/\d[\.\)]\s+[^.!?]+[.!?]/g);
+  if (numbered && numbered.length >= 2) {
+    return numbered.slice(0, 3).map((s) => s.replace(/^\d[\.\)]\s+/, "").trim());
+  }
+  // Fallback: split by sentence
+  const sentences = lastPara
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 20);
+  return sentences.slice(0, 3);
+}
+
+function TakeAction({ narrationText, locationName, era }: {
+  narrationText: string;
+  locationName: string;
+  era: Era;
+}) {
+  if (!narrationText.trim() || era === "1976") return null;
+
+  const items = parseActionItems(narrationText);
+  if (items.length === 0) return null;
+
+  const title = era === "2050"
+    ? "What must change to prevent this"
+    : "What you can do right now";
+
+  const icons = [CheckCircle2, AlertTriangle, Zap];
+
+  return (
+    <div className="mx-5 mb-6 mt-2 overflow-hidden rounded-xl border border-forest/15 bg-card sm:mx-8 lg:mx-12">
+      {/* header */}
+      <div className="flex items-center gap-2.5 border-b border-forest/10 bg-forest/5 px-5 py-3">
+        <CheckCircle2 size={14} className="shrink-0 text-forest" strokeWidth={2} />
+        <p className="font-ui text-[11px] font-semibold uppercase tracking-[.14em] text-forest">
+          {title}
+        </p>
+        <span className="ml-auto font-ui text-[9px] uppercase tracking-[.1em] text-ink/30">
+          — {locationName} asks
+        </span>
+      </div>
+      {/* items */}
+      <div className="divide-y divide-forest/8">
+        {items.map((item, i) => {
+          const Icon = icons[i] ?? CheckCircle2;
+          return (
+            <div key={i} className="flex items-start gap-3 px-5 py-3.5">
+              <div className="mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-full bg-forest/8">
+                <Icon size={11} className="text-forest" strokeWidth={2} />
+              </div>
+              <p className="font-display text-sm leading-6 text-ink/80">{item}</p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── live AQI badge ──────────────────────────────────────────────────────────
+
+function AqiBadge({ liveMetrics }: { liveMetrics: LiveMetrics }) {
+  if (!liveMetrics.europeanAqi || !liveMetrics.aqiCategory) return null;
+
+  const aqi = liveMetrics.europeanAqi;
+  const cat = liveMetrics.aqiCategory;
+
+  const color =
+    cat === "Good"      ? "text-statusGood border-statusGood/25 bg-statusGood/8" :
+    cat === "Fair"      ? "text-statusModerate border-statusModerate/25 bg-statusModerate/8" :
+    cat === "Moderate"  ? "text-statusModerate border-statusModerate/25 bg-statusModerate/8" :
+    "text-statusHigh border-statusHigh/25 bg-statusHigh/8";
+
+  return (
+    <div className={`mt-3 flex items-center gap-2 rounded-lg border px-3 py-2 ${color}`}>
+      <Wind size={12} className="shrink-0" />
+      <div className="min-w-0 flex-1">
+        <p className="font-ui text-[9px] font-semibold uppercase tracking-[.12em] opacity-60">Air Quality Index (Live)</p>
+        <p className="font-display text-sm font-bold">
+          {aqi} · {cat}
+          {liveMetrics.pm25 !== null && (
+            <span className="ml-2 font-ui text-[10px] font-normal opacity-70">PM2.5: {liveMetrics.pm25} µg/m³</span>
+          )}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ─── loading skeleton ─────────────────────────────────────────────────────────
+
+function NarrationSkeleton() {
+  return (
+    <div className="animate-pulse px-5 py-6 sm:px-8 sm:py-8 lg:px-12">
+      {/* label */}
+      <div className="mb-4 h-5 w-36 rounded-full bg-forest/10" />
+      {/* title */}
+      <div className="h-12 w-3/4 rounded-lg bg-forest/10" />
+      <div className="mt-2 h-12 w-1/2 rounded-lg bg-forest/8" />
+      {/* subtitle */}
+      <div className="mt-3 h-3 w-48 rounded-full bg-ink/8" />
+      {/* chips */}
+      <div className="mt-4 flex gap-4">
+        {[80, 64, 96].map((w, i) => (
+          <div key={i} className={`h-4 w-${w === 80 ? "20" : w === 64 ? "16" : "24"} rounded-full bg-ink/8`} />
+        ))}
+      </div>
+      {/* era + badge */}
+      <div className="mt-5 flex gap-4">
+        <div className="h-8 w-40 rounded-full bg-forest/10" />
+        <div className="h-8 w-36 rounded-full bg-forest/8" />
+      </div>
+      {/* play button */}
+      <div className="mt-6 flex items-center gap-4">
+        <div className="h-14 w-14 rounded-full bg-sage/30" />
+        <div className="h-8 flex-1 rounded-full bg-forest/8" />
+      </div>
+      {/* divider */}
+      <div className="my-7 h-px bg-forest/10" />
+      {/* narration lines */}
+      <div className="space-y-3">
+        <div className="h-4 w-full rounded-full bg-ink/8" />
+        <div className="h-4 w-5/6 rounded-full bg-ink/8" />
+        <div className="h-4 w-4/5 rounded-full bg-ink/8" />
+        <div className="mt-2 h-4 w-full rounded-full bg-ink/6" />
+        <div className="h-4 w-3/4 rounded-full bg-ink/6" />
+        <div className="mt-2 h-4 w-2/3 rounded-full bg-ink/5" />
+      </div>
+    </div>
+  );
+}
+
 // ─── center: hero + narration ─────────────────────────────────────────────────
 
-function NarrationHero({ location, era, setEra, playing, ttsLoading, onTogglePlay, liveNarration, narrationLoading }: {
+function NarrationHero({ location, era, setEra, playing, ttsLoading, onTogglePlay, liveNarration, narrationLoading, liveMetrics }: {
   location: LocationReading; era: Era; setEra: (e: Era) => void;
   playing: boolean; ttsLoading: boolean; onTogglePlay: () => void;
   liveNarration: string; narrationLoading: boolean;
+  liveMetrics: LiveMetrics | null;
 }) {
   const text = liveNarration || location.narration;
   const paragraphs = text.split("\n\n").map((p) => p.replace(/\n/g, " ").trim()).filter(Boolean);
@@ -724,7 +882,19 @@ function NarrationHero({ location, era, setEra, playing, ttsLoading, onTogglePla
         )}
           </motion.div>
         </AnimatePresence>
+
+        {/* Live AQI inline badge */}
+        {liveMetrics && era === "Today" && <AqiBadge liveMetrics={liveMetrics} />}
       </div>
+
+      {/* Take Action section — outside padded div so it spans full width */}
+      {!narrationLoading && (
+        <TakeAction
+          narrationText={liveNarration || location.narration}
+          locationName={location.name}
+          era={era}
+        />
+      )}
     </div>
   );
 }
@@ -867,9 +1037,10 @@ export default function NarrationExperience() {
   const searchParams = useSearchParams();
   const { locationId, era, setEra, setLocationId, searchLocation, addJournalEntry, addLetter } = useEchoEarth();
 
-  const [liveReading,      setLiveReading]      = useState<LocationReading | null>(null);
+  const [liveReading,      setLiveReading]      = useState<(LocationReading & { liveMetrics: LiveMetrics | null }) | null>(null);
   const [liveNarration,    setLiveNarration]     = useState("");
   const [narrationLoading, setNarrationLoading]  = useState(false);
+  const [locationLoading,  setLocationLoading]   = useState(false);
   const [playing,          setPlaying]           = useState(false);
   const [menuOpen,         setMenuOpen]          = useState(false);
   const [searchOpen,       setSearchOpen]        = useState(false);
@@ -910,11 +1081,13 @@ export default function NarrationExperience() {
     abortRef.current = abort;
 
     async function loadLiveData() {
+      setLocationLoading(true);
       try {
         const locRes = await fetch(`/api/location?id=${locationId}&era=${era}`, { signal: abort.signal });
-        if (!locRes.ok || abort.signal.aborted) return;
-        const enriched: LocationReading & { liveMetrics: unknown } = await locRes.json();
+        if (!locRes.ok || abort.signal.aborted) { setLocationLoading(false); return; }
+        const enriched: LocationReading & { liveMetrics: LiveMetrics | null } = await locRes.json();
         setLiveReading(enriched);
+        setLocationLoading(false);
 
         if (era !== "Today") return;
 
@@ -926,7 +1099,7 @@ export default function NarrationExperience() {
             locationId, era,
             locationName: enriched.name, subtitle: enriched.subtitle,
             headline: enriched.headline, metrics: enriched.metrics,
-            liveMetrics: (enriched as { liveMetrics: unknown }).liveMetrics ?? null,
+            liveMetrics: enriched.liveMetrics ?? null,
             summary: enriched.summary,
           }),
           signal: abort.signal,
@@ -948,6 +1121,7 @@ export default function NarrationExperience() {
         if ((err as { name?: string })?.name === "AbortError") return;
         console.error("[NarrationExperience]", err);
         setNarrationLoading(false);
+        setLocationLoading(false);
       }
     }
 
@@ -1007,11 +1181,18 @@ export default function NarrationExperience() {
           <div className="min-w-0 flex-1 overflow-y-auto pb-16 lg:pb-0">
             {/* ── Desktop: always show story + letter ── */}
             <div className="hidden lg:block">
-              <NarrationHero
-                location={currentReading} era={era} setEra={setEra}
-                playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
-                liveNarration={liveNarration} narrationLoading={narrationLoading} />
-              <LetterComposer location={currentReading} addLetter={addLetter} />
+            {locationLoading ? (
+                <NarrationSkeleton />
+              ) : (
+                <>
+                  <NarrationHero
+                    location={currentReading} era={era} setEra={setEra}
+                    playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
+                    liveNarration={liveNarration} narrationLoading={narrationLoading}
+                    liveMetrics={liveReading?.liveMetrics ?? null} />
+                  <LetterComposer location={currentReading} addLetter={addLetter} />
+                </>
+              )}
             </div>
 
             {/* ── Mobile: tab-controlled ── */}
@@ -1021,10 +1202,15 @@ export default function NarrationExperience() {
                   <motion.div key="story"
                     initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
-                    <NarrationHero
-                      location={currentReading} era={era} setEra={setEra}
-                      playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
-                      liveNarration={liveNarration} narrationLoading={narrationLoading} />
+                    {locationLoading ? (
+                      <NarrationSkeleton />
+                    ) : (
+                      <NarrationHero
+                        location={currentReading} era={era} setEra={setEra}
+                        playing={playing} ttsLoading={ttsLoading} onTogglePlay={togglePlay}
+                        liveNarration={liveNarration} narrationLoading={narrationLoading}
+                        liveMetrics={liveReading?.liveMetrics ?? null} />
+                    )}
                   </motion.div>
                 )}
                 {mobileTab === "data" && (
@@ -1032,7 +1218,7 @@ export default function NarrationExperience() {
                     initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
                     <div className="px-4 py-5">
-                      <ConditionPanel location={currentReading} />
+                      <ConditionPanel location={currentReading} liveMetrics={liveReading?.liveMetrics ?? null} />
                     </div>
                   </motion.div>
                 )}
@@ -1058,7 +1244,7 @@ export default function NarrationExperience() {
                 transition={{ duration: 0.35, ease: "easeOut" }}
                 className="h-full"
               >
-                <ConditionPanel location={currentReading} />
+                <ConditionPanel location={currentReading} liveMetrics={liveReading?.liveMetrics ?? null} />
               </motion.div>
             </AnimatePresence>
           </div>
