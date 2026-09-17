@@ -120,7 +120,48 @@ function Waveform({ playing, large = false }: { playing: boolean; large?: boolea
   );
 }
 
-// ─── ElevenLabs audio hook ────────────────────────────────────────────────────
+// ─── Web Speech API fallback ──────────────────────────────────────────────────
+// Used when ElevenLabs is unavailable or fails.
+// Picks the best available neural voice on the device.
+
+function speakWithWebSpeech(text: string, onEnd: () => void): () => void {
+  if (typeof window === "undefined" || !window.speechSynthesis) {
+    onEnd(); return () => {};
+  }
+  window.speechSynthesis.cancel();
+
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate  = 0.88;   // slightly slower = more gravitas
+  utterance.pitch = 0.92;   // slightly lower pitch = more natural
+  utterance.volume = 1;
+
+  // Pick the best available voice — prefer neural/natural voices
+  const voices = window.speechSynthesis.getVoices();
+  const preferred = [
+    // macOS / iOS neural voices
+    "Samantha", "Daniel", "Karen", "Moira",
+    // Windows neural voices
+    "Microsoft Aria Online", "Microsoft Guy Online",
+    "Microsoft Jenny Online", "Microsoft Zira",
+    // Chrome OS / Android
+    "Google UK English Female", "Google UK English Male",
+    "Google US English",
+  ];
+  const best = preferred
+    .map((name) => voices.find((v) => v.name.includes(name)))
+    .find(Boolean);
+  if (best) utterance.voice = best;
+
+  utterance.onend = onEnd;
+  utterance.onerror = onEnd;
+  window.speechSynthesis.speak(utterance);
+
+  return () => { window.speechSynthesis.cancel(); };
+}
+
+// ─── Main TTS hook ────────────────────────────────────────────────────────────
+// Tries ElevenLabs first (full narration, no cutoff).
+// Falls back to Web Speech API if ElevenLabs fails or has no key.
 
 function useElevenLabsAudio(
   narration: string,
@@ -128,11 +169,12 @@ function useElevenLabsAudio(
   playing: boolean,
   onStop: () => void,
 ) {
-  const audioRef = useRef<HTMLAudioElement | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const audioRef    = useRef<HTMLAudioElement | null>(null);
+  const abortRef    = useRef<AbortController | null>(null);
+  const wsCleanup   = useRef<(() => void) | null>(null);
   const [loading, setLoading] = useState(false);
 
-  function stopAudio() {
+  function stopAll() {
     abortRef.current?.abort();
     abortRef.current = null;
     if (audioRef.current) {
@@ -140,11 +182,14 @@ function useElevenLabsAudio(
       URL.revokeObjectURL(audioRef.current.src);
       audioRef.current = null;
     }
+    wsCleanup.current?.();
+    wsCleanup.current = null;
+    if (typeof window !== "undefined") window.speechSynthesis?.cancel();
     setLoading(false);
   }
 
   useEffect(() => {
-    if (!playing) { stopAudio(); return; }
+    if (!playing) { stopAll(); return; }
     if (!narration.trim()) return;
 
     const abort = new AbortController();
@@ -159,23 +204,48 @@ function useElevenLabsAudio(
           body: JSON.stringify({ text: narration, locationId }),
           signal: abort.signal,
         });
-        if (!res.ok || !res.body || abort.signal.aborted) { setLoading(false); onStop(); return; }
-        const blob = await res.blob();
-        if (abort.signal.aborted) { setLoading(false); return; }
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audioRef.current = audio;
-        audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; onStop(); };
-        audio.onerror = () => { URL.revokeObjectURL(url); audioRef.current = null; onStop(); };
-        setLoading(false);
-        await audio.play();
+
+        // ElevenLabs succeeded — play the full audio
+        if (res.ok && res.body && !abort.signal.aborted) {
+          const blob = await res.blob();
+          if (abort.signal.aborted) { setLoading(false); return; }
+          const url = URL.createObjectURL(blob);
+          const audio = new Audio(url);
+          audioRef.current = audio;
+          audio.onended = () => { URL.revokeObjectURL(url); audioRef.current = null; onStop(); };
+          audio.onerror = () => {
+            URL.revokeObjectURL(url);
+            audioRef.current = null;
+            // ElevenLabs audio errored — fall back to Web Speech
+            if (!abort.signal.aborted) {
+              wsCleanup.current = speakWithWebSpeech(narration, onStop);
+            }
+          };
+          setLoading(false);
+          await audio.play();
+          return;
+        }
+
+        // ElevenLabs failed (quota, error, no key) — use Web Speech fallback
+        if (!abort.signal.aborted) {
+          setLoading(false);
+          wsCleanup.current = speakWithWebSpeech(narration, onStop);
+        }
       } catch (err: unknown) {
-        if ((err as { name?: string })?.name !== "AbortError") { console.error("[TTS]", err); onStop(); }
+        if ((err as { name?: string })?.name === "AbortError") {
+          setLoading(false);
+          return;
+        }
+        // Network error — fall back to Web Speech
+        console.warn("[TTS] ElevenLabs unavailable, using Web Speech fallback");
         setLoading(false);
+        if (!abort.signal.aborted) {
+          wsCleanup.current = speakWithWebSpeech(narration, onStop);
+        }
       }
     })();
 
-    return () => { abort.abort(); stopAudio(); };
+    return () => { abort.abort(); stopAll(); };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [playing, narration, locationId]);
 

@@ -2,30 +2,115 @@
  * POST /api/tts
  * Body: { text: string, locationId: string }
  *
- * Picks a gendered voice based on the river's cultural identity,
- * calls ElevenLabs TTS, and streams audio back as audio/mpeg.
+ * Splits the narration into sentence chunks (≤ 500 chars each),
+ * converts each chunk with ElevenLabs, and returns all audio as a
+ * single concatenated audio/mpeg response.
+ *
+ * Voice settings are tuned for warm, documentary-style narration —
+ * not robotic, not over-expressive.
  */
 
 import { NextRequest } from "next/server";
 
 // ─── Voice assignment ────────────────────────────────────────────────────────
-// Female: Matilda — warm, audiobook, poetic (XrExE9yKIg1WjnnlVkGX)
-// Male:   Adam    — deep, narration, powerful (pNInz6obpgDQGcFmaJgB)
+// George  — deep, warm, documentary male (JBFqnCBsd6RMkjVDRZzb)
+// Matilda — warm, calm, audiobook female (XrExE9yKIg1WjnnlVkGX)
+// River voices assigned by cultural gender tradition
 
-const FEMALE_VOICE_ID = "XrExE9yKIg1WjnnlVkGX"; // Matilda — warm female narration
-const MALE_VOICE_ID   = "pNInz6obpgDQGcFmaJgB"; // Adam    — deep male narration
+const MALE_VOICE_ID   = "JBFqnCBsd6RMkjVDRZzb"; // George — deep documentary
+const FEMALE_VOICE_ID = "XrExE9yKIg1WjnnlVkGX"; // Matilda — warm audiobook
 
-// Rivers traditionally considered feminine or male in their cultures
 const MALE_RIVERS = new Set([
-  "brahmaputra", // only major river considered male in Hindu tradition
-  "amazon",      // "Amazonas" — masculine in Portuguese
-  "nile",        // masculine in Arabic (النيل)
-  "colorado",    // masculine in Spanish
-  "yangtze",     // masculine in Chinese cultural context
+  "brahmaputra",
+  "amazon",
+  "nile",
+  "colorado",
+  "yangtze",
 ]);
 
 function pickVoice(locationId: string): string {
   return MALE_RIVERS.has(locationId) ? MALE_VOICE_ID : FEMALE_VOICE_ID;
+}
+
+// ─── Split text into natural sentence chunks ─────────────────────────────────
+// Splits on sentence boundaries, keeping each chunk ≤ maxChars.
+// This means the full narration plays — no cutoff.
+
+function splitIntoChunks(text: string, maxChars = 500): string[] {
+  // Split on sentence endings followed by space or end of string
+  const sentences = text
+    .replace(/\n\n+/g, " ")
+    .replace(/\n/g, " ")
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+
+  const chunks: string[] = [];
+  let current = "";
+
+  for (const sentence of sentences) {
+    if ((current + " " + sentence).trim().length <= maxChars) {
+      current = current ? current + " " + sentence : sentence;
+    } else {
+      if (current) chunks.push(current.trim());
+      // If a single sentence is longer than maxChars, split at commas
+      if (sentence.length > maxChars) {
+        const parts = sentence.split(/(?<=,)\s+/);
+        let sub = "";
+        for (const part of parts) {
+          if ((sub + " " + part).trim().length <= maxChars) {
+            sub = sub ? sub + " " + part : part;
+          } else {
+            if (sub) chunks.push(sub.trim());
+            sub = part;
+          }
+        }
+        if (sub) chunks.push(sub.trim());
+        current = "";
+      } else {
+        current = sentence;
+      }
+    }
+  }
+  if (current) chunks.push(current.trim());
+  return chunks.filter(Boolean);
+}
+
+// ─── Call ElevenLabs for one chunk ───────────────────────────────────────────
+
+async function synthesiseChunk(
+  text: string,
+  voiceId: string,
+  apiKey: string,
+): Promise<ArrayBuffer | null> {
+  const res = await fetch(
+    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`,
+    {
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        Accept: "audio/mpeg",
+      },
+      body: JSON.stringify({
+        text,
+        model_id: "eleven_turbo_v2_5", // fastest + highest quality free model
+        voice_settings: {
+          stability:         0.65, // more stable = less robotic variation
+          similarity_boost:  0.75, // how close to the reference voice
+          style:             0.20, // low style = more natural, less theatrical
+          use_speaker_boost: true,
+        },
+      }),
+    },
+  );
+
+  if (!res.ok) {
+    console.error(`[tts] ElevenLabs chunk error: ${res.status} — ${await res.text()}`);
+    return null;
+  }
+
+  return res.arrayBuffer();
 }
 
 // ─── Route ───────────────────────────────────────────────────────────────────
@@ -46,47 +131,37 @@ export async function POST(req: NextRequest) {
   const text = body.text?.trim();
   if (!text) return new Response("text is required", { status: 400 });
 
-  // Cap to ~400 chars for ElevenLabs free tier — take first 2 paragraphs
-  const paragraphs = text.split(/\n\n+/).filter(Boolean);
-  const ttsText = paragraphs.slice(0, 2).join("\n\n").slice(0, 420).trim();
-
   const voiceId = pickVoice(body.locationId ?? "");
+  const chunks = splitIntoChunks(text, 500);
 
-  // ElevenLabs TTS — streaming endpoint
-  const elRes = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`,
-    {
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-        Accept: "audio/mpeg",
-      },
-      body: JSON.stringify({
-        text: ttsText,
-        model_id: "eleven_multilingual_v2",
-        voice_settings: {
-          stability:        0.45, // slight variation for natural delivery
-          similarity_boost: 0.82,
-          style:            0.35, // some expressiveness without overdoing it
-          use_speaker_boost: true,
-        },
-      }),
-    },
+  // Synthesise all chunks — up to 6 to keep latency reasonable
+  const toSynth = chunks.slice(0, 6);
+
+  // Run all chunks in parallel for speed
+  const results = await Promise.all(
+    toSynth.map((chunk) => synthesiseChunk(chunk, voiceId, apiKey)),
   );
 
-  if (!elRes.ok) {
-    const err = await elRes.text();
-    console.error("[api/tts] ElevenLabs error:", elRes.status, err);
-    return new Response(`ElevenLabs error: ${elRes.status}`, { status: 502 });
+  // Filter out any failed chunks
+  const buffers = results.filter((b): b is ArrayBuffer => b !== null);
+
+  if (buffers.length === 0) {
+    return new Response("TTS synthesis failed for all chunks", { status: 502 });
   }
 
-  // Stream the audio directly to the client
-  return new Response(elRes.body, {
+  // Concatenate all MP3 buffers into one response
+  const totalLength = buffers.reduce((sum, b) => sum + b.byteLength, 0);
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const buf of buffers) {
+    combined.set(new Uint8Array(buf), offset);
+    offset += buf.byteLength;
+  }
+
+  return new Response(combined, {
     headers: {
       "Content-Type":  "audio/mpeg",
       "Cache-Control": "no-store",
-      "Transfer-Encoding": "chunked",
     },
   });
 }
